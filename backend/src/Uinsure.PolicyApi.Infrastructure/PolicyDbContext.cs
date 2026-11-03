@@ -19,7 +19,16 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
             policy.HasKey(p => p.Reference);
             policy.Property(p => p.Reference).HasMaxLength(PolicyRules.MaxReferenceLength);
             policy.Property(p => p.InsuranceType).HasConversion<string>().HasMaxLength(20);
-            policy.Property(p => p.Amount).HasPrecision(18, 2);
+            policy.Property(p => p.Status).HasConversion<string>().HasMaxLength(20);
+
+            // Optimistic concurrency: an update fails if another request changed the policy first.
+            policy.Property(p => p.Version).IsConcurrencyToken();
+
+            // Derived from the latest term rather than stored.
+            policy.Ignore(p => p.LatestTerm);
+            policy.Ignore(p => p.StartDate);
+            policy.Ignore(p => p.EndDate);
+            policy.Ignore(p => p.Amount);
 
             policy.OwnsOne(p => p.Property, property =>
             {
@@ -38,6 +47,15 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
                 holder.HasKey("Id");
                 holder.Property(h => h.FirstName).HasMaxLength(PolicyRules.MaxNameLength);
                 holder.Property(h => h.LastName).HasMaxLength(PolicyRules.MaxNameLength);
+            });
+
+            policy.OwnsMany(p => p.Terms, term =>
+            {
+                term.ToTable("PolicyTerms");
+                term.WithOwner().HasForeignKey(PolicyForeignKey);
+                term.HasKey(PolicyForeignKey, nameof(PolicyTerm.TermNumber));
+                term.Property(t => t.TermNumber).ValueGeneratedNever();
+                term.Property(t => t.Amount).HasPrecision(18, 2);
             });
 
             policy.OwnsMany(p => p.Payments, payment =>

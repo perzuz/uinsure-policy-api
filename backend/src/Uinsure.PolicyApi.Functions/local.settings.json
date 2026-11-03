@@ -3,6 +3,7 @@
   "Values": {
     "AzureWebJobsStorage": "",
     "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
-    "ConnectionStrings__Policies": "Data Source=policies.db"
+    "ConnectionStrings__Policies": "Data Source=policies.db",
+    "TimeOverride__Today": ""
   }
 }
