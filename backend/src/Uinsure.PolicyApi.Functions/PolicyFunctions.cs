@@ -1,18 +1,45 @@
+using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
+using Microsoft.Azure.WebJobs.Extensions.OpenApi.Core.Attributes;
 using Microsoft.Extensions.Logging;
+using Microsoft.OpenApi.Models;
 using Uinsure.PolicyApi.Core.Contracts;
 using Uinsure.PolicyApi.Core.Services;
+using Uinsure.PolicyApi.Functions.OpenApi;
 
 namespace Uinsure.PolicyApi.Functions;
 
 public sealed class PolicyFunctions(IPolicyService policyService, ILogger<PolicyFunctions> logger)
 {
+    private const string PoliciesTag = "Policies";
+    private const string JsonContentType = "application/json";
+    private const string ProblemJsonContentType = "application/problem+json";
+
     private static readonly JsonSerializerOptions RequestJsonOptions = new(JsonSerializerDefaults.Web);
 
     [Function("SellPolicy")]
+    [OpenApiOperation(
+        operationId: "SellPolicy",
+        tags: [PoliciesTag],
+        Summary = "Sell a policy",
+        Description = "Creates a policy and records a payment for the full amount. Rules: the reference must be unique " +
+            "(case-insensitive, max 20 characters); the start date must be between today and 60 days ahead; the policy " +
+            "lasts 1 year (the end date is calculated); 1 to 3 policyholders, each at least 16 on the start date; " +
+            "address line 1 and postcode (max 8 characters) are required; the amount must be greater than 0 with at most " +
+            "2 decimal places.")]
+    [OpenApiRequestBody(JsonContentType, typeof(SellPolicyRequest), Required = true, Example = typeof(SellPolicyRequestExample))]
+    [OpenApiResponseWithBody(HttpStatusCode.Created, JsonContentType, typeof(PolicyResponse),
+        CustomHeaderType = typeof(LocationHeader), Description = "Policy sold.")]
+    [OpenApiResponseWithBody(HttpStatusCode.BadRequest, ProblemJsonContentType, typeof(ValidationProblemDetails),
+        Description = "A business rule failed (errors keyed by field, e.g. 'StartDate', 'Property.Postcode', " +
+            "'Policyholders[0]'), or the body is not valid JSON.")]
+    [OpenApiResponseWithBody(HttpStatusCode.Conflict, ProblemJsonContentType, typeof(ProblemDetails),
+        Description = "A policy with this reference already exists.")]
+    [OpenApiResponseWithBody(HttpStatusCode.UnsupportedMediaType, ProblemJsonContentType, typeof(ProblemDetails),
+        Description = "The request body was not sent as application/json.")]
     public async Task<IActionResult> SellPolicy(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "policies")] HttpRequest request,
         CancellationToken cancellationToken)
@@ -61,6 +88,13 @@ public sealed class PolicyFunctions(IPolicyService policyService, ILogger<Policy
     }
 
     [Function("GetPolicy")]
+    [OpenApiOperation(operationId: "GetPolicy", tags: [PoliciesTag], Summary = "Retrieve a policy")]
+    [OpenApiParameter("reference", In = ParameterLocation.Path, Required = true, Type = typeof(string),
+        Description = "The policy reference (case-insensitive).")]
+    [OpenApiResponseWithBody(HttpStatusCode.OK, JsonContentType, typeof(PolicyResponse),
+        Description = "The policy, with its property, policyholders, payments and refunds.")]
+    [OpenApiResponseWithBody(HttpStatusCode.NotFound, ProblemJsonContentType, typeof(ProblemDetails),
+        Description = "No policy exists with this reference.")]
     public async Task<IActionResult> GetPolicy(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "policies/{reference}")] HttpRequest request,
         string reference,

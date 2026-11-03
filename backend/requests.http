@@ -3,6 +3,9 @@
 
 @baseUrl = http://localhost:7071/api
 
+### OpenAPI document (Swagger UI is at http://localhost:7071/api/swagger/ui)
+GET {{baseUrl}}/openapi/v3.json
+
 ### Sell a policy (201 Created)
 POST {{baseUrl}}/policies
 Content-Type: application/json
