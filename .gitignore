@@ -1,0 +1,44 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+artifacts/
+publish/
+
+# IDE / user files
+.vs/
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.user
+*.suo
+*.rsuser
+*.DotSettings.user
+
+# Test results / coverage
+[Tt]est[Rr]esult*/
+coverage*/
+*.coverage
+*.coveragexml
+coverage.cobertura.xml
+
+# Azure Functions
+local.settings.json
+!backend/src/Uinsure.PolicyApi.Functions/local.settings.json
+__blobstorage__/
+__queuestorage__/
+__azurite_db*__.json
+
+# Local SQLite databases
+*.db
+*.db-shm
+*.db-wal
+
+# Frontend (placeholder for later)
+node_modules/
+dist/
+
+# OS
+.DS_Store
+Thumbs.db

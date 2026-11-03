@@ -1,0 +1,64 @@
+# Sample requests for the Policy API (VS Code REST Client / Visual Studio / Rider).
+# Start the API first: see README. Adjust startDate to within 60 days of today.
+
+@baseUrl = http://localhost:7071/api
+
+### Sell a policy (201 Created)
+POST {{baseUrl}}/policies
+Content-Type: application/json
+
+{
+  "reference": "POL-0001",
+  "insuranceType": "Household",
+  "startDate": "2026-11-20",
+  "amount": 325.50,
+  "autoRenew": true,
+  "paymentType": "Card",
+  "property": {
+    "addressLine1": "1 High Street",
+    "addressLine2": "Little Town",
+    "postcode": "AB1 2CD"
+  },
+  "policyholders": [
+    { "firstName": "Jane", "lastName": "Smith", "dateOfBirth": "1985-04-12" }
+  ]
+}
+
+### Sell the same reference again (409 Conflict)
+POST {{baseUrl}}/policies
+Content-Type: application/json
+
+{
+  "reference": "pol-0001",
+  "insuranceType": "BuyToLet",
+  "startDate": "2026-11-20",
+  "amount": 410.00,
+  "paymentType": "DirectDebit",
+  "property": { "addressLine1": "2 High Street", "postcode": "AB1 2CD" },
+  "policyholders": [ { "firstName": "John", "lastName": "Smith", "dateOfBirth": "1980-01-01" } ]
+}
+
+### Retrieve a policy (200 OK)
+GET {{baseUrl}}/policies/POL-0001
+
+### Retrieve an unknown policy (404 Not Found)
+GET {{baseUrl}}/policies/DOES-NOT-EXIST
+
+### Invalid policy (400 with field errors)
+POST {{baseUrl}}/policies
+Content-Type: application/json
+
+{
+  "reference": "POL-0002",
+  "insuranceType": "Household",
+  "startDate": "2030-01-01",
+  "amount": 0,
+  "paymentType": "Cheque",
+  "property": { "addressLine1": "", "postcode": "TOOLONG123" },
+  "policyholders": [
+    { "firstName": "Young", "lastName": "Person", "dateOfBirth": "2015-01-01" },
+    { "firstName": "A", "lastName": "B", "dateOfBirth": "1980-01-01" },
+    { "firstName": "C", "lastName": "D", "dateOfBirth": "1980-01-01" },
+    { "firstName": "E", "lastName": "F", "dateOfBirth": "1980-01-01" }
+  ]
+}
