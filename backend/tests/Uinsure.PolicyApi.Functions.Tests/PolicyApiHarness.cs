@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Uinsure.PolicyApi.Core;
 using Uinsure.PolicyApi.Core.Services;
+using Uinsure.PolicyApi.Functions.Policies;
 using Uinsure.PolicyApi.Infrastructure;
 
 namespace Uinsure.PolicyApi.Functions.Tests;
@@ -33,7 +34,7 @@ public sealed class PolicyApiHarness : IAsyncDisposable
 
         _services = new ServiceCollection()
             .AddLogging()
-            .AddSingleton<TimeProvider>(new FakeTimeProvider(new DateTimeOffset(Today, TimeOnly.MinValue, TimeSpan.Zero)))
+            .AddSingleton<TimeProvider>(Clock)
             .AddPolicyCore()
             .AddPolicyInfrastructure(options => options.UseSqlite(_connection))
             .BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true });
@@ -41,26 +42,40 @@ public sealed class PolicyApiHarness : IAsyncDisposable
         _services.EnsurePolicyDatabaseCreatedAsync().GetAwaiter().GetResult();
     }
 
+    /// <summary>The API's clock. Starts at <see cref="Today"/>; tests can move it forward.</summary>
+    public FakeTimeProvider Clock { get; } = new(new DateTimeOffset(Today, TimeOnly.MinValue, TimeSpan.Zero));
+
     public IServiceProvider Services => _services;
+
+    public void SetToday(DateOnly today) => Clock.SetUtcNow(new DateTimeOffset(today, TimeOnly.MinValue, TimeSpan.Zero));
 
     public Task<IActionResult> SellAsync(object body) =>
         SellRawAsync(JsonSerializer.Serialize(body, Json));
 
-    public async Task<IActionResult> SellRawAsync(string body, string contentType = "application/json")
-    {
-        await using var scope = _services.CreateAsyncScope();
-        var request = CreateRequest("POST", "/api/policies", body, contentType);
+    public Task<IActionResult> SellRawAsync(string body, string contentType = "application/json") =>
+        InvokeAsync("POST", "/api/policies", body, contentType, (scope, request) =>
+            new SellPolicyFunction(Service(scope), NullLogger<SellPolicyFunction>.Instance)
+                .Run(request, TestContext.Current.CancellationToken));
 
-        return await CreateFunctions(scope).SellPolicy(request, TestContext.Current.CancellationToken);
-    }
+    public Task<IActionResult> GetAsync(string reference) =>
+        InvokeAsync("GET", $"/api/policies/{reference}", null, null, (scope, request) =>
+            new GetPolicyFunction(Service(scope)).Run(request, reference, TestContext.Current.CancellationToken));
 
-    public async Task<IActionResult> GetAsync(string reference)
-    {
-        await using var scope = _services.CreateAsyncScope();
-        var request = CreateRequest("GET", $"/api/policies/{reference}");
+    public Task<IActionResult> CancelAsync(string reference, object body) =>
+        CancelRawAsync(reference, JsonSerializer.Serialize(body, Json));
 
-        return await CreateFunctions(scope).GetPolicy(request, reference, TestContext.Current.CancellationToken);
-    }
+    public Task<IActionResult> CancelRawAsync(string reference, string body, string contentType = "application/json") =>
+        InvokeAsync("POST", $"/api/policies/{reference}/cancel", body, contentType, (scope, request) =>
+            new CancelPolicyFunction(Service(scope), NullLogger<CancelPolicyFunction>.Instance)
+                .Run(request, reference, TestContext.Current.CancellationToken));
+
+    public Task<IActionResult> RenewAsync(string reference, object body) =>
+        RenewRawAsync(reference, JsonSerializer.Serialize(body, Json));
+
+    public Task<IActionResult> RenewRawAsync(string reference, string body, string contentType = "application/json") =>
+        InvokeAsync("POST", $"/api/policies/{reference}/renew", body, contentType, (scope, request) =>
+            new RenewPolicyFunction(Service(scope), NullLogger<RenewPolicyFunction>.Instance)
+                .Run(request, reference, TestContext.Current.CancellationToken));
 
     public async ValueTask DisposeAsync()
     {
@@ -68,8 +83,19 @@ public sealed class PolicyApiHarness : IAsyncDisposable
         await _connection.DisposeAsync();
     }
 
-    private static PolicyFunctions CreateFunctions(AsyncServiceScope scope) =>
-        new(scope.ServiceProvider.GetRequiredService<IPolicyService>(), NullLogger<PolicyFunctions>.Instance);
+    private async Task<IActionResult> InvokeAsync(
+        string method,
+        string path,
+        string? body,
+        string? contentType,
+        Func<AsyncServiceScope, HttpRequest, Task<IActionResult>> function)
+    {
+        await using var scope = _services.CreateAsyncScope();
+        return await function(scope, CreateRequest(method, path, body, contentType));
+    }
+
+    private static IPolicyService Service(AsyncServiceScope scope) =>
+        scope.ServiceProvider.GetRequiredService<IPolicyService>();
 
     private static HttpRequest CreateRequest(string method, string path, string? body = null, string? contentType = null)
     {

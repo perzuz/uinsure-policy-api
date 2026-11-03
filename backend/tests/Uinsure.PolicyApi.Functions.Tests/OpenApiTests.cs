@@ -10,20 +10,43 @@ using Newtonsoft.Json.Serialization;
 using Uinsure.PolicyApi.Core.Contracts;
 using Uinsure.PolicyApi.Core.Domain;
 using Uinsure.PolicyApi.Functions.OpenApi;
+using Uinsure.PolicyApi.Functions.Policies;
 
 namespace Uinsure.PolicyApi.Functions.Tests;
 
 public sealed class OpenApiTests
 {
-    private static readonly MethodInfo[] PolicyFunctionMethods =
-        [.. typeof(PolicyFunctions).GetMethods().Where(m => m.GetCustomAttribute<FunctionAttribute>() is not null)];
+    // Every function in the app, found by reflection, so a new function is covered automatically.
+    private static readonly MethodInfo[] FunctionMethods =
+    [
+        .. typeof(SellPolicyFunction).Assembly.GetTypes()
+            .SelectMany(t => t.GetMethods())
+            .Where(m => m.GetCustomAttribute<FunctionAttribute>() is not null),
+    ];
+
+    private static MethodInfo Function(string name) =>
+        FunctionMethods.Single(m => m.GetCustomAttribute<FunctionAttribute>()!.Name == name);
 
     [Fact]
-    public void Every_policy_function_is_documented_with_a_unique_operation()
+    public void All_four_policy_functions_exist()
     {
-        var operations = PolicyFunctionMethods
+        FunctionMethods.Select(m => m.GetCustomAttribute<FunctionAttribute>()!.Name)
+            .ShouldBe(["SellPolicy", "GetPolicy", "CancelPolicy", "RenewPolicy"], ignoreOrder: true);
+    }
+
+    [Fact]
+    public void Each_function_is_in_its_own_class_named_after_it()
+    {
+        FunctionMethods.ShouldAllBe(m => m.DeclaringType!.Name == m.GetCustomAttribute<FunctionAttribute>()!.Name + "Function");
+        FunctionMethods.GroupBy(m => m.DeclaringType).ShouldAllBe(g => g.Count() == 1);
+    }
+
+    [Fact]
+    public void Every_function_is_documented_with_a_unique_operation()
+    {
+        var operations = FunctionMethods
             .Select(m => m.GetCustomAttribute<OpenApiOperationAttribute>()
-                ?? throw new ShouldAssertException($"{m.Name} has no [OpenApiOperation] attribute."))
+                ?? throw new ShouldAssertException($"{m.DeclaringType!.Name} has no [OpenApiOperation] attribute."))
             .ToList();
 
         operations.Select(o => o.OperationId).ShouldBeUnique();
@@ -31,11 +54,13 @@ public sealed class OpenApiTests
     }
 
     [Theory]
-    [InlineData(nameof(PolicyFunctions.SellPolicy), new[] { HttpStatusCode.Created, HttpStatusCode.BadRequest, HttpStatusCode.Conflict, HttpStatusCode.UnsupportedMediaType })]
-    [InlineData(nameof(PolicyFunctions.GetPolicy), new[] { HttpStatusCode.OK, HttpStatusCode.NotFound })]
+    [InlineData("SellPolicy", new[] { HttpStatusCode.Created, HttpStatusCode.BadRequest, HttpStatusCode.Conflict, HttpStatusCode.UnsupportedMediaType })]
+    [InlineData("GetPolicy", new[] { HttpStatusCode.OK, HttpStatusCode.NotFound })]
+    [InlineData("CancelPolicy", new[] { HttpStatusCode.OK, HttpStatusCode.BadRequest, HttpStatusCode.NotFound, HttpStatusCode.Conflict, HttpStatusCode.UnsupportedMediaType })]
+    [InlineData("RenewPolicy", new[] { HttpStatusCode.OK, HttpStatusCode.BadRequest, HttpStatusCode.NotFound, HttpStatusCode.Conflict, HttpStatusCode.UnsupportedMediaType })]
     public void Every_status_code_a_function_returns_is_documented(string functionName, HttpStatusCode[] expected)
     {
-        var documented = typeof(PolicyFunctions).GetMethod(functionName)!
+        var documented = Function(functionName)
             .GetCustomAttributes<OpenApiResponseWithBodyAttribute>()
             .Select(a => a.StatusCode);
 
@@ -43,11 +68,30 @@ public sealed class OpenApiTests
     }
 
     [Fact]
+    public void Cancel_and_renew_examples_are_in_the_format_the_api_accepts()
+    {
+        var today = new DateOnly(2026, 6, 15);
+        var cancelJson = Newtonsoft.Json.JsonConvert.SerializeObject(CancelPolicyRequestExample.Create(today), CamelCase);
+        var renewJson = Newtonsoft.Json.JsonConvert.SerializeObject(RenewPolicyRequestExample.Create(), CamelCase);
+
+        JsonSerializer.Deserialize<CancelPolicyRequest>(cancelJson, PolicyApiHarness.Json)!.CancellationDate.ShouldBe(today);
+        var renew = JsonSerializer.Deserialize<RenewPolicyRequest>(renewJson, PolicyApiHarness.Json)!;
+        renew.Amount.ShouldBe(340.00m);
+        renew.PaymentType.ShouldBe(PaymentType.Card);
+    }
+
+    private static readonly Newtonsoft.Json.JsonSerializerSettings CamelCase = new()
+    {
+        ContractResolver = new DefaultContractResolver { NamingStrategy = new CamelCaseNamingStrategy() },
+    };
+
+    [Fact]
     public void Enums_are_documented_and_serialised_by_name_for_the_openapi_extension()
     {
         // The extension uses Newtonsoft; the API uses System.Text.Json. Both must agree on names.
         Newtonsoft.Json.JsonConvert.SerializeObject(InsuranceType.BuyToLet).ShouldBe("\"BuyToLet\"");
         Newtonsoft.Json.JsonConvert.SerializeObject(PaymentType.DirectDebit).ShouldBe("\"DirectDebit\"");
+        Newtonsoft.Json.JsonConvert.SerializeObject(PolicyStatus.Cancelled).ShouldBe("\"Cancelled\"");
     }
 
     [Fact]

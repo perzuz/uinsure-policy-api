@@ -65,3 +65,28 @@ Content-Type: application/json
     { "firstName": "E", "lastName": "F", "dateOfBirth": "1980-01-01" }
   ]
 }
+
+### Renew a policy (409 until 30 days before its end date; see TimeOverride__Today in the README)
+POST {{baseUrl}}/policies/POL-0001/renew
+Content-Type: application/json
+
+{
+  "amount": 340.00,
+  "paymentType": "Card"
+}
+
+### Cancel a policy (200 with refunds; use a date from today onwards)
+POST {{baseUrl}}/policies/POL-0001/cancel
+Content-Type: application/json
+
+{
+  "cancellationDate": "2026-11-25"
+}
+
+### Cancel it again (409 Conflict)
+POST {{baseUrl}}/policies/POL-0001/cancel
+Content-Type: application/json
+
+{
+  "cancellationDate": "2026-11-26"
+}

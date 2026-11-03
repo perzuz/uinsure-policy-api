@@ -14,6 +14,8 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IReferenceGenerator, ReferenceGenerator>();
         services.AddScoped<IValidator<SellPolicyRequest>, SellPolicyRequestValidator>();
+        services.AddScoped<IValidator<CancelPolicyRequest>, CancelPolicyRequestValidator>();
+        services.AddScoped<IValidator<RenewPolicyRequest>, RenewPolicyRequestValidator>();
         services.AddScoped<IPolicyService, PolicyService>();
 
         return services;

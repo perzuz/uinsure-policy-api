@@ -24,11 +24,7 @@ public sealed class SellPolicyRequestValidator : AbstractValidator<SellPolicyReq
             .NotNull()
             .IsInEnum();
 
-        RuleFor(x => x.Amount)
-            .NotNull()
-            .GreaterThan(0)
-            .PrecisionScale(18, 2, ignoreTrailingZeros: true)
-            .WithMessage("'Amount' must have no more than 2 decimal places.");
+        RuleFor(x => x.Amount).MustBeAValidPremium();
 
         RuleFor(x => x.StartDate)
             .NotNull()

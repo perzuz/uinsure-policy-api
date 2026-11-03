@@ -38,6 +38,22 @@ public sealed class PolicyTests
         payment.PaymentReference.ShouldBe("PAY-1");
         payment.Type.ShouldBe(PaymentType.DirectDebit);
         payment.Amount.ShouldBe(199.99m);
+        payment.TermNumber.ShouldBe(1);
+    }
+
+    [Fact]
+    public void Selling_a_policy_creates_the_first_term_and_an_active_status()
+    {
+        var policy = SellPolicy();
+
+        var term = policy.Terms.ShouldHaveSingleItem();
+        term.TermNumber.ShouldBe(1);
+        term.StartDate.ShouldBe(StartDate);
+        term.EndDate.ShouldBe(new DateOnly(2027, 7, 1));
+        term.Amount.ShouldBe(199.99m);
+        policy.LatestTerm.ShouldBe(term);
+        policy.Status.ShouldBe(PolicyStatus.Active);
+        policy.CancellationDate.ShouldBeNull();
     }
 
     [Theory]
@@ -77,5 +93,6 @@ public sealed class PolicyTests
             autoRenew,
             new InsuredProperty("1 High Street", null, null, "AB1 2CD"),
             [new Policyholder("Jane", "Smith", new DateOnly(1990, 1, 1))],
-            new Payment("PAY-1", PaymentType.DirectDebit, 199.99m));
+            "PAY-1",
+            PaymentType.DirectDebit);
 }

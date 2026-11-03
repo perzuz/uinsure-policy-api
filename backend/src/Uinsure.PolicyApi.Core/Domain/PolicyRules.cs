@@ -11,6 +11,8 @@ public static class PolicyRules
     public const int MinPolicyholders = 1;
     public const int MaxPolicyholders = 3;
     public const int MinPolicyholderAge = 16;
+    public const int RenewalWindowDays = 30;
+    public const int CoolingOffDays = 14;
 
     public const int MaxReferenceLength = 20;
     public const int MaxNameLength = 100;
