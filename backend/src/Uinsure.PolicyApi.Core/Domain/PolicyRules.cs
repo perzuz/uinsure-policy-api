@@ -19,6 +19,12 @@ public static class PolicyRules
     public const int MaxAddressLineLength = 100;
     public const int MaxPostcodeLength = 8;
 
+    public const string AutoRenewByChequeError = "Auto-renewing policies cannot be paid by cheque.";
+
+    /// <summary>Cheques can't be collected automatically, so they can't pay for an auto renewal.</summary>
+    public static bool IsAllowedPaymentType(bool autoRenew, PaymentType paymentType) =>
+        !(autoRenew && paymentType == PaymentType.Cheque);
+
     public static DateOnly CalculateEndDate(DateOnly startDate) => startDate.AddYears(TermInYears);
 
     /// <summary>

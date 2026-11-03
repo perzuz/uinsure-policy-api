@@ -2,7 +2,7 @@
 
 A REST API for selling, retrieving, cancelling and renewing home insurance policies. It's built with C# on **.NET 10 isolated-process Azure Functions**.
 
-It delivers the MoSCoW **Must** and **Should** requirements:
+It delivers all of the MoSCoW requirements: **Must**, **Should** and **Could**.
 
 | Priority | Requirement | Endpoint |
 |---|---|---|
@@ -10,8 +10,9 @@ It delivers the MoSCoW **Must** and **Should** requirements:
 | Must | Retrieve a policy | `GET /api/policies/{reference}` |
 | Should | Cancel a policy | `POST /api/policies/{reference}/cancel` |
 | Should | Renew a policy | `POST /api/policies/{reference}/renew` |
-
-The Could requirements are planned next. The refund calculation is already a standalone function, ready for a "cost to cancel" quote.
+| Could | Quote the cost of cancelling | `GET /api/policies/{reference}/cancellation-quote` |
+| Could | No refund for a policy with claims | `POST /api/policies/{reference}/claims` records a claim |
+| Could | No auto renewal paid by cheque | Enforced on sell and renew |
 
 ## Repository layout
 
@@ -107,7 +108,7 @@ The extension predates .NET's System.Text.Json and `DateOnly`, so two adjustment
 ```
 
 - `insuranceType` is `Household` or `BuyToLet`.
-- `paymentType` is `Card`, `DirectDebit` or `Cheque`.
+- `paymentType` is `Card`, `DirectDebit` or `Cheque`. `Cheque` is only allowed when `autoRenew` is `false`.
 
 | Status | When |
 |---|---|
@@ -157,10 +158,41 @@ Adds a new one-year term starting on the current end date, for the given premium
 | Status | When |
 |---|---|
 | `200 OK` | Renewed. The body is the policy with the new term, plus its payment if one was taken. |
-| `400 Bad Request` | The amount is invalid, `paymentType` is missing for an auto-renewing policy, or the body isn't valid JSON. |
+| `400 Bad Request` | The amount is invalid, `paymentType` is missing or `Cheque` for an auto-renewing policy, or the body isn't valid JSON. |
 | `404 Not Found` | No policy with that reference. |
 | `409 Conflict` | Outside the renewal window (the message says when it opens), already renewed, cancelled, or changed by another request. |
 | `415 Unsupported Media Type` | The body isn't sent as `application/json`. |
+
+### Quote the cost of cancelling: `GET /api/policies/{reference}/cancellation-quote?cancellationDate=2027-02-28`
+
+Returns the refunds cancelling on that date would give, using exactly the same calculation as cancelling, without changing the policy. `cancellationDate` is optional and defaults to today; it follows the same rules as cancel.
+
+```json
+{
+  "reference": "POL-0001",
+  "cancellationDate": "2027-02-28",
+  "hasClaims": false,
+  "totalRefund": 265.00,
+  "refunds": [ { "termNumber": 1, "type": "Card", "amount": 265.00 } ]
+}
+```
+
+| Status | When |
+|---|---|
+| `200 OK` | The quote. `refunds` is empty (and `totalRefund` is 0) if the policy has claims or nothing is refundable. |
+| `400 Bad Request` | The date isn't `yyyy-MM-dd`, is in the past, or is after the end date. |
+| `404 Not Found` | No policy with that reference. |
+| `409 Conflict` | The policy is already cancelled. |
+
+### Record a claim: `POST /api/policies/{reference}/claims`
+
+No body. Marks the policy as having claims (`hasClaims: true`). From then on, cancelling it gives no refund.
+
+| Status | When |
+|---|---|
+| `200 OK` | Claim recorded. The body is the policy. Recording another claim changes nothing. |
+| `404 Not Found` | No policy with that reference. |
+| `409 Conflict` | The policy is cancelled, or was changed by another request at the same time. |
 
 All errors use [RFC 9457 Problem Details](https://www.rfc-editor.org/rfc/rfc9457) (`application/problem+json`). Invalid input returns `400`, and a request that conflicts with the policy's current state returns `409`.
 
@@ -175,11 +207,13 @@ When selling a policy:
 - All policyholders must be at least 16 years old on the policy start date.
 - Property address line 1 is required. The postcode is required, with a max length of 8 characters.
 - A payment is recorded for the full amount using the chosen payment method.
+- An auto-renewing policy can't be paid by cheque.
 
 When renewing a policy:
 
 - A policy can only be renewed in the 30 days before its end date, and not after the end date.
 - An auto-renewing policy has a payment created; a policy that doesn't auto renew has no payment created.
+- The renewal payment for an auto-renewing policy can't be by cheque.
 
 When cancelling a policy:
 
@@ -187,6 +221,8 @@ When cancelling a policy:
 - Cancellation on or after the start date and within the 14-day cooling-off period results in a full refund.
 - Cancellation after the cooling-off period results in a pro rata refund for the days of insurance not used.
 - The refund is made to the same method as the original payment.
+- A policy with claims gets no refund.
+- The cost of cancelling on a given date can be quoted without cancelling.
 
 The rule constants live in one place, [`PolicyRules`](backend/src/Uinsure.PolicyApi.Core/Domain/PolicyRules.cs), so validation, the domain model and the database schema agree.
 
@@ -199,7 +235,7 @@ The rule constants live in one place, [`PolicyRules`](backend/src/Uinsure.Policy
 5. **Amount.** The amount is the annual premium, supplied by the consumer. It must be greater than 0 with at most 2 decimal places. Pricing is out of scope.
 6. **Payment at sale.** Selling a policy takes one payment for the full amount, using the payment method in the request.
 7. **Insurance type.** Household / Buy to Let is stored on the policy. No rules differ between the two types yet.
-8. **Has claims.** A new policy always starts with `hasClaims: false`.
+8. **Has claims.** A new policy always starts with `hasClaims: false`. It becomes `true` when a claim is recorded through `POST /claims`.
 9. **Postcode.** It is trimmed and upper-cased, then validated for presence and length (≤ 8) only. There is no full UK postcode format check, to avoid rejecting valid edge cases.
 10. **Field lengths.** These are not in the spec: names and address lines are limited to 100 characters each.
 11. **"Today".** This is the current UTC date. Time is injected through `TimeProvider`, so date rules are fully testable.
@@ -214,16 +250,20 @@ The rule constants live in one place, [`PolicyRules`](backend/src/Uinsure.Policy
 20. **Pro rata refund.** `amount paid × (end date − cancellation date) ÷ (end date − start date)`, in days, so the cancellation date counts as unused. Rounded to 2 decimal places with midpoint rounding away from zero. Leap-year terms are 366 days.
 21. **Refunds per term.** Each term that has a payment is refunded on its own, to that payment's method ("the same method as the original payment"). A renewed term with no payment (no auto renew) is not refunded, because nothing was collected. Zero-value refunds are not recorded.
 22. **Cancelled policies.** These can't be cancelled again or renewed (`409`).
+23. **Recording claims.** Claims handling is out of scope, so the API only records *that* a policy has a claim: no claim details are stored, and it can't be undone. A further claim changes nothing. A claim can't be recorded on a cancelled policy (`409`).
+24. **No refund with claims.** "No refund if there are claims" applies to the whole policy: every term, including a renewed term that hasn't started, gets no refund. The policy is still cancelled.
+25. **Cheque and auto renew.** Cheques can't be collected automatically, so `paymentType: Cheque` is rejected (`400` on `PaymentType`) when selling an auto-renewing policy and when renewing one. A policy that doesn't auto renew can still be paid by cheque, and its renewal takes no payment, so the payment type is ignored.
+26. **Cancellation quote.** The quote follows the same date rules as cancellation, and the date defaults to today. It isn't stored or reserved: the refund depends on the date the policy is actually cancelled, and on any claim recorded in between. It's a `GET` because it changes nothing.
 
 ## Design notes
 
-- **Thin functions, one per file.** Each function (`Policies/SellPolicyFunction.cs`, `GetPolicyFunction.cs`, `CancelPolicyFunction.cs`, `RenewPolicyFunction.cs`) only parses HTTP and maps results to status codes, using shared helpers in `Http/HttpResults.cs`. All business logic lives in `Core`, which has no dependency on Azure Functions or EF Core. A test enforces the `{Name}Function` naming convention.
-- **Rules in the domain.** `Policy.Cancel` and `Policy.Renew` enforce the state rules, and `RefundCalculator` is a pure function that is unit-tested rule by rule.
+- **Thin functions, one per file.** Each function (`Policies/SellPolicyFunction.cs`, `GetPolicyFunction.cs`, `CancelPolicyFunction.cs`, `RenewPolicyFunction.cs`, `GetCancellationQuoteFunction.cs`, `RecordClaimFunction.cs`) only parses HTTP and maps results to status codes, using shared helpers in `Http/HttpResults.cs`. All business logic lives in `Core`, which has no dependency on Azure Functions or EF Core. A test enforces the `{Name}Function` naming convention.
+- **Rules in the domain.** `Policy.Cancel`, `Policy.Renew` and `Policy.RecordClaim` enforce the state rules, and `RefundCalculator` is a pure function that is unit-tested rule by rule. `Policy.Cancel` issues exactly the refunds `Policy.QuoteCancellation` calculates, so a quote can't disagree with the real cancellation.
 - **Results, not exceptions.** `PolicyService` returns a `ServiceResult` (`Success`, `ValidationFailed`, `Conflict` or `NotFound`), and the domain returns a `DomainResult`, so expected outcomes are explicit and easy to test.
 - **Explicit missing fields.** Request value types are nullable. A missing `startDate` or `paymentType` gives a clear "required" error instead of silently becoming `0001-01-01` or the first enum value.
 - **Concurrency.** The policy reference is the primary key, so two concurrent sales of the same reference can't both succeed. Cancel and renew use optimistic concurrency: a `Version` column is checked on save. Two simultaneous cancellations can't both create refunds; the second gets `409` and can retry.
-- **Tests.** There are 209 tests:
-  - unit tests cover every rule boundary (day 60/61, 0/1/3/4 policyholders, the 16th birthday, leap days, postcode length, cooling-off day 13/14, renewal window day 30/31, pro rata rounding);
+- **Tests.** There are 255 tests:
+  - unit tests cover every rule boundary (day 60/61, 0/1/3/4 policyholders, the 16th birthday, leap days, postcode length, cooling-off day 13/14, renewal window day 30/31, pro rata rounding, cheque with and without auto renew);
   - integration tests drive the real function methods against in-memory SQLite, with a fake clock for date rules;
   - OpenAPI tests check that every function and status code is documented.
 

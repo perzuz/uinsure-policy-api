@@ -14,6 +14,14 @@ public interface IPolicyService
     Task<ServiceResult<PolicyResponse>> CancelAsync(string reference, CancelPolicyRequest request, CancellationToken cancellationToken);
 
     Task<ServiceResult<PolicyResponse>> RenewAsync(string reference, RenewPolicyRequest request, CancellationToken cancellationToken);
+
+    /// <summary>The refunds cancelling would give, without cancelling. A missing date means today.</summary>
+    Task<ServiceResult<CancellationQuoteResponse>> QuoteCancellationAsync(
+        string reference,
+        CancelPolicyRequest request,
+        CancellationToken cancellationToken);
+
+    Task<ServiceResult<PolicyResponse>> RecordClaimAsync(string reference, CancellationToken cancellationToken);
 }
 
 public sealed class PolicyService(
@@ -74,7 +82,7 @@ public sealed class PolicyService(
         var policy = await repository.GetByReferenceAsync(normalised, cancellationToken);
 
         return policy is null
-            ? PolicyNotFound(normalised)
+            ? PolicyNotFound<PolicyResponse>(normalised)
             : ServiceResult<PolicyResponse>.Success(PolicyResponse.From(policy));
     }
 
@@ -138,6 +146,49 @@ public sealed class PolicyService(
         return result;
     }
 
+    public async Task<ServiceResult<CancellationQuoteResponse>> QuoteCancellationAsync(
+        string reference,
+        CancelPolicyRequest request,
+        CancellationToken cancellationToken)
+    {
+        request = request with { CancellationDate = request.CancellationDate ?? timeProvider.GetUtcToday() };
+
+        var validation = await cancelValidator.ValidateAsync(request, cancellationToken);
+        if (!validation.IsValid)
+        {
+            return ServiceResult<CancellationQuoteResponse>.ValidationFailed(validation.ToDictionary().AsReadOnly());
+        }
+
+        var normalised = Policy.NormaliseReference(reference);
+        var policy = await repository.GetByReferenceAsync(normalised, cancellationToken);
+        if (policy is null)
+        {
+            return PolicyNotFound<CancellationQuoteResponse>(normalised);
+        }
+
+        var cancellationDate = request.CancellationDate!.Value;
+        var quote = policy.QuoteCancellation(cancellationDate);
+        if (!quote.IsSuccess)
+        {
+            return DomainFailure<CancellationQuoteResponse>(quote.Error!, quote.Field);
+        }
+
+        return ServiceResult<CancellationQuoteResponse>.Success(
+            CancellationQuoteResponse.From(policy, cancellationDate, quote.Value!));
+    }
+
+    public async Task<ServiceResult<PolicyResponse>> RecordClaimAsync(string reference, CancellationToken cancellationToken)
+    {
+        var result = await UpdateAsync(reference, policy => policy.RecordClaim(), cancellationToken);
+
+        if (result.Status == ServiceResultStatus.Success)
+        {
+            logger.LogInformation("Recorded a claim on policy {PolicyReference}", result.Value!.Reference);
+        }
+
+        return result;
+    }
+
     /// <summary>Loads a policy, applies a domain operation to it and saves the result.</summary>
     private async Task<ServiceResult<PolicyResponse>> UpdateAsync(
         string reference,
@@ -148,16 +199,13 @@ public sealed class PolicyService(
         var policy = await repository.GetForUpdateAsync(normalised, cancellationToken);
         if (policy is null)
         {
-            return PolicyNotFound(normalised);
+            return PolicyNotFound<PolicyResponse>(normalised);
         }
 
         var outcome = operation(policy);
         if (!outcome.IsSuccess)
         {
-            return outcome.Field is null
-                ? ServiceResult<PolicyResponse>.Conflict(outcome.Error!)
-                : ServiceResult<PolicyResponse>.ValidationFailed(
-                    new Dictionary<string, string[]> { [outcome.Field] = [outcome.Error!] });
+            return DomainFailure<PolicyResponse>(outcome.Error!, outcome.Field);
         }
 
         if (!await repository.SaveChangesAsync(cancellationToken))
@@ -169,8 +217,14 @@ public sealed class PolicyService(
         return ServiceResult<PolicyResponse>.Success(PolicyResponse.From(policy));
     }
 
-    private static ServiceResult<PolicyResponse> PolicyNotFound(string reference) =>
-        ServiceResult<PolicyResponse>.NotFound($"No policy found with reference '{reference}'.");
+    /// <summary>A rejection that names a request field is a validation error; any other is a conflict with the policy's state.</summary>
+    private static ServiceResult<T> DomainFailure<T>(string error, string? field) =>
+        field is null
+            ? ServiceResult<T>.Conflict(error)
+            : ServiceResult<T>.ValidationFailed(new Dictionary<string, string[]> { [field] = [error] });
+
+    private static ServiceResult<T> PolicyNotFound<T>(string reference) =>
+        ServiceResult<T>.NotFound($"No policy found with reference '{reference}'.");
 
     private static ServiceResult<PolicyResponse> DuplicateReference(string reference) =>
         ServiceResult<PolicyResponse>.Conflict($"A policy with reference '{reference}' already exists.");
