@@ -68,7 +68,7 @@ public sealed class SqlitePolicyRepositoryTests : IAsyncDisposable
         {
             var repository = scope.ServiceProvider.GetRequiredService<IPolicyRepository>();
             var loaded = (await repository.GetForUpdateAsync("POL-1", TestContext.Current.CancellationToken)).ShouldNotBeNull();
-            loaded.Renew(new DateOnly(2027, 6, 15), 120m, PaymentType.Cheque, () => "PAY-2").IsSuccess.ShouldBeTrue();
+            loaded.Renew(new DateOnly(2027, 6, 15), 120m, PaymentType.Card, () => "PAY-2").IsSuccess.ShouldBeTrue();
             (await repository.SaveChangesAsync(TestContext.Current.CancellationToken)).ShouldBeTrue();
         }
 

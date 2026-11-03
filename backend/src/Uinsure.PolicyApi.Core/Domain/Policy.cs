@@ -71,7 +71,8 @@ public sealed class Policy
 
     /// <summary>
     /// Adds the next one-year term. Renewal is allowed from 30 days before the end date up to and
-    /// including the end date. A payment is taken only when the policy is set to auto renew.
+    /// including the end date. A payment is taken only when the policy is set to auto renew, and
+    /// it can't be by cheque.
     /// </summary>
     public DomainResult Renew(DateOnly today, decimal amount, PaymentType? paymentType, Func<string> newPaymentReference)
     {
@@ -106,6 +107,11 @@ public sealed class Policy
                 "'Payment Type' is required to renew an auto-renewing policy, because a payment is taken.");
         }
 
+        if (paymentType is { } type && !PolicyRules.IsAllowedPaymentType(AutoRenew, type))
+        {
+            return DomainResult.Invalid("PaymentType", PolicyRules.AutoRenewByChequeError);
+        }
+
         var term = new PolicyTerm(latest.TermNumber + 1, latest.EndDate, amount);
         _terms.Add(term);
 
@@ -124,6 +130,31 @@ public sealed class Policy
     /// </summary>
     public DomainResult Cancel(DateOnly cancellationDate, Func<string> newRefundReference)
     {
+        var quote = QuoteCancellation(cancellationDate);
+        if (!quote.IsSuccess)
+        {
+            return quote.WithoutValue();
+        }
+
+        foreach (var refund in quote.Value!)
+        {
+            _refunds.Add(new Refund(newRefundReference(), refund.Type, refund.Amount, refund.TermNumber));
+        }
+
+        Status = PolicyStatus.Cancelled;
+        CancellationDate = cancellationDate;
+        Version++;
+
+        return DomainResult.Success;
+    }
+
+    /// <summary>
+    /// The refunds that cancelling from <paramref name="cancellationDate"/> would issue, without
+    /// changing the policy. <see cref="Cancel"/> uses the same calculation, so a quote always
+    /// matches the cancellation it describes. A policy with claims gets no refund.
+    /// </summary>
+    public DomainResult<IReadOnlyList<RefundQuote>> QuoteCancellation(DateOnly cancellationDate)
+    {
         if (Status == PolicyStatus.Cancelled)
         {
             return DomainResult.Conflict($"The policy has already been cancelled from {CancellationDate:yyyy-MM-dd}.");
@@ -136,7 +167,13 @@ public sealed class Policy
                 $"'Cancellation Date' cannot be after the policy end date ({EndDate:yyyy-MM-dd}).");
         }
 
+        if (HasClaims)
+        {
+            return DomainResult<IReadOnlyList<RefundQuote>>.Success([]);
+        }
+
         // Terms renewed without auto renew have no payment, so there is nothing to refund for them.
+        var refunds = new List<RefundQuote>();
         foreach (var payment in _payments.OrderBy(p => p.TermNumber))
         {
             var term = _terms.Single(t => t.TermNumber == payment.TermNumber);
@@ -144,13 +181,29 @@ public sealed class Policy
 
             if (refundAmount > 0)
             {
-                _refunds.Add(new Refund(newRefundReference(), payment.Type, refundAmount, term.TermNumber));
+                refunds.Add(new RefundQuote(term.TermNumber, payment.Type, refundAmount));
             }
         }
 
-        Status = PolicyStatus.Cancelled;
-        CancellationDate = cancellationDate;
-        Version++;
+        return DomainResult<IReadOnlyList<RefundQuote>>.Success(refunds);
+    }
+
+    /// <summary>
+    /// Records that a claim has been made on the policy. From then on, cancelling it gives no refund.
+    /// Recording a further claim changes nothing.
+    /// </summary>
+    public DomainResult RecordClaim()
+    {
+        if (Status == PolicyStatus.Cancelled)
+        {
+            return DomainResult.Conflict("A claim cannot be recorded on a cancelled policy.");
+        }
+
+        if (!HasClaims)
+        {
+            HasClaims = true;
+            Version++;
+        }
 
         return DomainResult.Success;
     }

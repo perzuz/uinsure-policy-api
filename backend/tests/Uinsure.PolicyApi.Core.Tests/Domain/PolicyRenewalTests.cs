@@ -62,11 +62,11 @@ public sealed class PolicyRenewalTests
     {
         var policy = TestPolicies.Sold(autoRenew: true);
 
-        Renew(policy, "2027-06-15", amount: 400.00m, paymentType: PaymentType.Cheque);
+        Renew(policy, "2027-06-15", amount: 400.00m, paymentType: PaymentType.DirectDebit);
 
         var payment = policy.Payments.Single(p => p.TermNumber == 2);
         payment.PaymentReference.ShouldBe("PAY-R-1");
-        payment.Type.ShouldBe(PaymentType.Cheque);
+        payment.Type.ShouldBe(PaymentType.DirectDebit);
         payment.Amount.ShouldBe(400.00m);
     }
 
@@ -92,6 +92,31 @@ public sealed class PolicyRenewalTests
         result.Field.ShouldBe("PaymentType");
         policy.Terms.Count.ShouldBe(1);
         policy.Payments.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public void Renewing_an_auto_renewing_policy_by_cheque_is_rejected_as_invalid()
+    {
+        var policy = TestPolicies.Sold(autoRenew: true);
+
+        var result = Renew(policy, "2027-06-15", paymentType: PaymentType.Cheque);
+
+        result.IsSuccess.ShouldBeFalse();
+        result.Field.ShouldBe("PaymentType");
+        result.Error.ShouldBe("Auto-renewing policies cannot be paid by cheque.");
+        policy.Terms.Count.ShouldBe(1);
+        policy.Version.ShouldBe(0);
+    }
+
+    [Fact]
+    public void A_cheque_payment_type_is_ignored_when_renewing_a_policy_that_does_not_auto_renew()
+    {
+        // No payment is taken, so the payment type doesn't matter.
+        var policy = TestPolicies.Sold(autoRenew: false, paymentType: PaymentType.Cheque);
+
+        Renew(policy, "2027-06-15", paymentType: PaymentType.Cheque).IsSuccess.ShouldBeTrue();
+
+        policy.Payments.ShouldHaveSingleItem().TermNumber.ShouldBe(1);
     }
 
     [Fact]

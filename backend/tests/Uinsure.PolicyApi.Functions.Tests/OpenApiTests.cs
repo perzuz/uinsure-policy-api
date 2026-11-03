@@ -28,10 +28,12 @@ public sealed class OpenApiTests
         FunctionMethods.Single(m => m.GetCustomAttribute<FunctionAttribute>()!.Name == name);
 
     [Fact]
-    public void All_four_policy_functions_exist()
+    public void All_policy_functions_exist()
     {
         FunctionMethods.Select(m => m.GetCustomAttribute<FunctionAttribute>()!.Name)
-            .ShouldBe(["SellPolicy", "GetPolicy", "CancelPolicy", "RenewPolicy"], ignoreOrder: true);
+            .ShouldBe(
+                ["SellPolicy", "GetPolicy", "CancelPolicy", "RenewPolicy", "GetCancellationQuote", "RecordClaim"],
+                ignoreOrder: true);
     }
 
     [Fact]
@@ -58,6 +60,8 @@ public sealed class OpenApiTests
     [InlineData("GetPolicy", new[] { HttpStatusCode.OK, HttpStatusCode.NotFound })]
     [InlineData("CancelPolicy", new[] { HttpStatusCode.OK, HttpStatusCode.BadRequest, HttpStatusCode.NotFound, HttpStatusCode.Conflict, HttpStatusCode.UnsupportedMediaType })]
     [InlineData("RenewPolicy", new[] { HttpStatusCode.OK, HttpStatusCode.BadRequest, HttpStatusCode.NotFound, HttpStatusCode.Conflict, HttpStatusCode.UnsupportedMediaType })]
+    [InlineData("GetCancellationQuote", new[] { HttpStatusCode.OK, HttpStatusCode.BadRequest, HttpStatusCode.NotFound, HttpStatusCode.Conflict })]
+    [InlineData("RecordClaim", new[] { HttpStatusCode.OK, HttpStatusCode.NotFound, HttpStatusCode.Conflict })]
     public void Every_status_code_a_function_returns_is_documented(string functionName, HttpStatusCode[] expected)
     {
         var documented = Function(functionName)

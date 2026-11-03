@@ -23,7 +23,8 @@ public sealed class PolicyCancellationTests
     [InlineData(PaymentType.Cheque)]
     public void The_refund_is_made_to_the_same_method_as_the_original_payment(PaymentType paymentType)
     {
-        var policy = TestPolicies.Sold(paymentType: paymentType);
+        // Cheque can only pay for a policy that doesn't auto renew.
+        var policy = TestPolicies.Sold(autoRenew: paymentType != PaymentType.Cheque, paymentType: paymentType);
 
         policy.Cancel(new DateOnly(2026, 6, 20), TestPolicies.References("REF"));
 

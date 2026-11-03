@@ -22,7 +22,9 @@ public sealed class SellPolicyRequestValidator : AbstractValidator<SellPolicyReq
 
         RuleFor(x => x.PaymentType)
             .NotNull()
-            .IsInEnum();
+            .IsInEnum()
+            .Must((request, paymentType) => PolicyRules.IsAllowedPaymentType(request.AutoRenew, paymentType!.Value))
+            .WithMessage(PolicyRules.AutoRenewByChequeError);
 
         RuleFor(x => x.Amount).MustBeAValidPremium();
 

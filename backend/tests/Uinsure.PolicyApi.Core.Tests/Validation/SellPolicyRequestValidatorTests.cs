@@ -188,11 +188,32 @@ public sealed class SellPolicyRequestValidatorTests
     [InlineData(PaymentType.Card)]
     [InlineData(PaymentType.DirectDebit)]
     [InlineData(PaymentType.Cheque)]
-    public void Each_payment_type_is_valid(PaymentType paymentType)
+    public void Each_payment_type_is_valid_for_a_policy_that_does_not_auto_renew(PaymentType paymentType)
     {
-        var request = TestData.ValidRequest() with { PaymentType = paymentType };
+        var request = TestData.ValidRequest() with { PaymentType = paymentType, AutoRenew = false };
 
         _validator.TestValidate(request).ShouldNotHaveAnyValidationErrors();
+    }
+
+    [Theory]
+    [InlineData(PaymentType.Card)]
+    [InlineData(PaymentType.DirectDebit)]
+    public void Card_and_direct_debit_are_valid_for_an_auto_renewing_policy(PaymentType paymentType)
+    {
+        var request = TestData.ValidRequest() with { PaymentType = paymentType, AutoRenew = true };
+
+        _validator.TestValidate(request).ShouldNotHaveAnyValidationErrors();
+    }
+
+    [Fact]
+    public void An_auto_renewing_policy_cannot_be_paid_by_cheque()
+    {
+        var request = TestData.ValidRequest() with { PaymentType = PaymentType.Cheque, AutoRenew = true };
+
+        _validator.TestValidate(request)
+            .ShouldHaveValidationErrorFor(x => x.PaymentType)
+            .WithErrorMessage(PolicyRules.AutoRenewByChequeError)
+            .Only();
     }
 
     // --- Property ---

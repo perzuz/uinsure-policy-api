@@ -77,6 +77,26 @@ public sealed class PolicyApiHarness : IAsyncDisposable
             new RenewPolicyFunction(Service(scope), NullLogger<RenewPolicyFunction>.Instance)
                 .Run(request, reference, TestContext.Current.CancellationToken));
 
+    public Task<IActionResult> QuoteAsync(string reference, string? cancellationDate = null) =>
+        InvokeAsync(
+            "GET",
+            $"/api/policies/{reference}/cancellation-quote",
+            null,
+            null,
+            (scope, request) =>
+            {
+                if (cancellationDate is not null)
+                {
+                    request.QueryString = QueryString.Create("cancellationDate", cancellationDate);
+                }
+
+                return new GetCancellationQuoteFunction(Service(scope)).Run(request, reference, TestContext.Current.CancellationToken);
+            });
+
+    public Task<IActionResult> RecordClaimAsync(string reference) =>
+        InvokeAsync("POST", $"/api/policies/{reference}/claims", null, null, (scope, request) =>
+            new RecordClaimFunction(Service(scope)).Run(request, reference, TestContext.Current.CancellationToken));
+
     public async ValueTask DisposeAsync()
     {
         await _services.DisposeAsync();

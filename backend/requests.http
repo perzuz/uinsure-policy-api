@@ -75,6 +75,12 @@ Content-Type: application/json
   "paymentType": "Card"
 }
 
+### Quote the cost of cancelling today (200; nothing is changed)
+GET {{baseUrl}}/policies/POL-0001/cancellation-quote
+
+### Quote the cost of cancelling on a given date (use a date from today onwards)
+GET {{baseUrl}}/policies/POL-0001/cancellation-quote?cancellationDate=2026-11-25
+
 ### Cancel a policy (200 with refunds; use a date from today onwards)
 POST {{baseUrl}}/policies/POL-0001/cancel
 Content-Type: application/json
@@ -90,3 +96,39 @@ Content-Type: application/json
 {
   "cancellationDate": "2026-11-26"
 }
+
+### Sell an auto-renewing policy paid by cheque (400: not allowed)
+POST {{baseUrl}}/policies
+Content-Type: application/json
+
+{
+  "reference": "POL-0002",
+  "insuranceType": "Household",
+  "startDate": "2026-11-20",
+  "amount": 300.00,
+  "autoRenew": true,
+  "paymentType": "Cheque",
+  "property": { "addressLine1": "3 High Street", "postcode": "AB1 2CD" },
+  "policyholders": [ { "firstName": "Sam", "lastName": "Jones", "dateOfBirth": "1980-01-01" } ]
+}
+
+### Sell the same policy without auto renew (201: cheque is fine)
+POST {{baseUrl}}/policies
+Content-Type: application/json
+
+{
+  "reference": "POL-0002",
+  "insuranceType": "Household",
+  "startDate": "2026-11-20",
+  "amount": 300.00,
+  "autoRenew": false,
+  "paymentType": "Cheque",
+  "property": { "addressLine1": "3 High Street", "postcode": "AB1 2CD" },
+  "policyholders": [ { "firstName": "Sam", "lastName": "Jones", "dateOfBirth": "1980-01-01" } ]
+}
+
+### Record a claim on it (200, hasClaims: true)
+POST {{baseUrl}}/policies/POL-0002/claims
+
+### Quote again (200, totalRefund 0: a policy with claims gets no refund)
+GET {{baseUrl}}/policies/POL-0002/cancellation-quote

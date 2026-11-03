@@ -122,6 +122,18 @@ public sealed class RenewPolicyFunctionTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Renewing_an_auto_renewing_policy_by_cheque_returns_400()
+    {
+        await SellAsync();
+        _api.SetToday(PolicyEnd.AddDays(-10));
+
+        var result = await _api.RenewAsync("POL-0001", new { amount = 450.00m, paymentType = "Cheque" });
+
+        result.ShouldBeOfType<BadRequestObjectResult>().Value.ShouldBeOfType<ValidationProblemDetails>()
+            .Errors["PaymentType"].ShouldBe(["Auto-renewing policies cannot be paid by cheque."]);
+    }
+
+    [Fact]
     public async Task Renewing_with_an_invalid_amount_returns_400()
     {
         await SellAsync();

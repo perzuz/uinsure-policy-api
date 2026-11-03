@@ -72,6 +72,28 @@ public sealed class SellPolicyFunctionTests : IAsyncDisposable
             ignoreOrder: true);
     }
 
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task Cheque_can_only_pay_for_a_policy_that_does_not_auto_renew(bool autoRenew, bool accepted)
+    {
+        var body = PolicyApiHarness.ValidBody();
+        body["paymentType"] = "Cheque";
+        body["autoRenew"] = autoRenew;
+
+        var result = await _api.SellAsync(body);
+
+        if (accepted)
+        {
+            result.ShouldBeOfType<CreatedResult>();
+        }
+        else
+        {
+            result.ShouldBeOfType<BadRequestObjectResult>().Value.ShouldBeOfType<ValidationProblemDetails>()
+                .Errors["PaymentType"].ShouldBe(["Auto-renewing policies cannot be paid by cheque."]);
+        }
+    }
+
     [Fact]
     public async Task Selling_a_duplicate_reference_returns_409()
     {
