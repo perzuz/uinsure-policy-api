@@ -15,13 +15,16 @@ public sealed class RenewPolicyFunctionTests : IAsyncDisposable
     public ValueTask DisposeAsync() => _api.DisposeAsync();
 
     [Fact]
-    public async Task Renewing_within_the_window_adds_a_term_and_payment_and_is_persisted()
+    public async Task GIVEN_a_policy_in_its_renewal_window_WHEN_renewing_THEN_a_term_and_payment_are_added_and_persisted()
     {
+        // Arrange
         await SellAsync();
         _api.SetToday(PolicyEnd.AddDays(-10));
 
+        // Act
         var result = await _api.RenewAsync("pol-0001", new { amount = 450.00m, paymentType = "Card" });
 
+        // Assert
         var policy = result.ShouldBeOfType<OkObjectResult>().Value.ShouldBeOfType<PolicyResponse>();
         policy.Terms.Select(t => (t.TermNumber, t.StartDate, t.EndDate, t.Amount)).ShouldBe(
         [
@@ -41,27 +44,33 @@ public sealed class RenewPolicyFunctionTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task Renewing_a_policy_that_does_not_auto_renew_takes_no_payment()
+    public async Task GIVEN_a_policy_that_does_not_auto_renew_WHEN_renewing_THEN_no_payment_is_taken()
     {
+        // Arrange
         var body = PolicyApiHarness.ValidBody("POL-0001");
         body["autoRenew"] = false;
         (await _api.SellAsync(body)).ShouldBeOfType<CreatedResult>();
         _api.SetToday(PolicyEnd);
 
+        // Act
         var result = await _api.RenewAsync("POL-0001", new { amount = 450.00m });
 
+        // Assert
         var policy = result.ShouldBeOfType<OkObjectResult>().Value.ShouldBeOfType<PolicyResponse>();
         policy.Terms.Count.ShouldBe(2);
         policy.Payments.ShouldHaveSingleItem().TermNumber.ShouldBe(1);
     }
 
     [Fact]
-    public async Task Renewing_before_the_window_returns_409_with_the_date_it_opens()
+    public async Task GIVEN_the_renewal_window_has_not_opened_WHEN_renewing_THEN_409_gives_the_date_it_opens()
     {
+        // Arrange
         await SellAsync();
 
+        // Act
         var result = await _api.RenewAsync("POL-0001", new { amount = 450.00m, paymentType = "Card" });
 
+        // Assert
         var conflict = result.ShouldBeOfType<ObjectResult>();
         conflict.StatusCode.ShouldBe(StatusCodes.Status409Conflict);
         var problem = conflict.Value.ShouldBeOfType<ProblemDetails>();
@@ -71,25 +80,31 @@ public sealed class RenewPolicyFunctionTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task Renewing_after_the_end_date_returns_409()
+    public async Task GIVEN_the_end_date_has_passed_WHEN_renewing_THEN_409_is_returned()
     {
+        // Arrange
         await SellAsync();
         _api.SetToday(PolicyEnd.AddDays(1));
 
+        // Act
         var result = await _api.RenewAsync("POL-0001", new { amount = 450.00m, paymentType = "Card" });
 
+        // Assert
         result.ShouldBeOfType<ObjectResult>().StatusCode.ShouldBe(StatusCodes.Status409Conflict);
     }
 
     [Fact]
-    public async Task Renewing_twice_returns_409()
+    public async Task GIVEN_an_already_renewed_policy_WHEN_renewing_again_THEN_409_is_returned()
     {
+        // Arrange
         await SellAsync();
         _api.SetToday(PolicyEnd.AddDays(-10));
         await _api.RenewAsync("POL-0001", new { amount = 450.00m, paymentType = "Card" });
 
+        // Act
         var result = await _api.RenewAsync("POL-0001", new { amount = 450.00m, paymentType = "Card" });
 
+        // Assert
         var conflict = result.ShouldBeOfType<ObjectResult>();
         conflict.StatusCode.ShouldBe(StatusCodes.Status409Conflict);
         conflict.Value.ShouldBeOfType<ProblemDetails>().Detail
@@ -97,66 +112,82 @@ public sealed class RenewPolicyFunctionTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task Renewing_a_cancelled_policy_returns_409()
+    public async Task GIVEN_a_cancelled_policy_WHEN_renewing_THEN_409_is_returned()
     {
+        // Arrange
         await SellAsync();
         await _api.CancelAsync("POL-0001", new { cancellationDate = "2026-06-20" });
         _api.SetToday(PolicyEnd.AddDays(-10));
 
+        // Act
         var result = await _api.RenewAsync("POL-0001", new { amount = 450.00m, paymentType = "Card" });
 
+        // Assert
         result.ShouldBeOfType<ObjectResult>().Value.ShouldBeOfType<ProblemDetails>().Detail
             .ShouldBe("A cancelled policy cannot be renewed.");
     }
 
     [Fact]
-    public async Task Renewing_an_auto_renewing_policy_without_a_payment_type_returns_400()
+    public async Task GIVEN_an_auto_renewing_policy_WHEN_renewing_without_a_payment_type_THEN_400_is_returned()
     {
+        // Arrange
         await SellAsync();
         _api.SetToday(PolicyEnd.AddDays(-10));
 
+        // Act
         var result = await _api.RenewAsync("POL-0001", new { amount = 450.00m });
 
+        // Assert
         result.ShouldBeOfType<BadRequestObjectResult>().Value.ShouldBeOfType<ValidationProblemDetails>()
             .Errors.Keys.ShouldBe(["PaymentType"]);
     }
 
     [Fact]
-    public async Task Renewing_an_auto_renewing_policy_by_cheque_returns_400()
+    public async Task GIVEN_an_auto_renewing_policy_WHEN_renewing_by_cheque_THEN_400_is_returned()
     {
+        // Arrange
         await SellAsync();
         _api.SetToday(PolicyEnd.AddDays(-10));
 
+        // Act
         var result = await _api.RenewAsync("POL-0001", new { amount = 450.00m, paymentType = "Cheque" });
 
+        // Assert
         result.ShouldBeOfType<BadRequestObjectResult>().Value.ShouldBeOfType<ValidationProblemDetails>()
             .Errors["PaymentType"].ShouldBe(["Auto-renewing policies cannot be paid by cheque."]);
     }
 
     [Fact]
-    public async Task Renewing_with_an_invalid_amount_returns_400()
+    public async Task GIVEN_an_invalid_amount_WHEN_renewing_THEN_400_is_returned()
     {
+        // Arrange
         await SellAsync();
 
+        // Act
         var result = await _api.RenewAsync("POL-0001", new { amount = 0, paymentType = "Card" });
 
+        // Assert
         result.ShouldBeOfType<BadRequestObjectResult>().Value.ShouldBeOfType<ValidationProblemDetails>()
             .Errors.Keys.ShouldBe(["Amount"]);
     }
 
     [Fact]
-    public async Task Renewing_an_unknown_policy_returns_404()
+    public async Task GIVEN_an_unknown_reference_WHEN_renewing_THEN_404_is_returned()
     {
+        // Act
         var result = await _api.RenewAsync("NOPE", new { amount = 450.00m, paymentType = "Card" });
 
+        // Assert
         result.ShouldBeOfType<ObjectResult>().StatusCode.ShouldBe(StatusCodes.Status404NotFound);
     }
 
     [Fact]
-    public async Task Invalid_payment_type_returns_400_naming_the_field()
+    public async Task GIVEN_an_unknown_payment_type_WHEN_renewing_THEN_400_names_the_field()
     {
+        // Act
         var result = await _api.RenewRawAsync("POL-0001", "{\"amount\": 450, \"paymentType\": \"Bitcoin\"}");
 
+        // Assert
         var badRequest = result.ShouldBeOfType<ObjectResult>();
         badRequest.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
         badRequest.Value.ShouldBeOfType<ProblemDetails>().Detail.ShouldNotBeNull().ShouldContain("'$.paymentType'");

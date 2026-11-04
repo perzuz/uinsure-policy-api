@@ -15,23 +15,26 @@ public sealed class CancelAndRenewRequestValidatorTests
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(400)]
-    public void Cancellation_date_today_or_later_is_valid(int daysAhead)
+    public void GIVEN_a_cancellation_date_today_or_later_WHEN_validating_THEN_it_is_valid(int daysAhead)
     {
+        // Act & Assert
         _cancelValidator.TestValidate(new CancelPolicyRequest { CancellationDate = TestData.Today.AddDays(daysAhead) })
             .ShouldNotHaveAnyValidationErrors();
     }
 
     [Fact]
-    public void Cancellation_date_in_the_past_is_invalid()
+    public void GIVEN_a_cancellation_date_in_the_past_WHEN_validating_THEN_it_is_invalid()
     {
+        // Act & Assert
         _cancelValidator.TestValidate(new CancelPolicyRequest { CancellationDate = TestData.Today.AddDays(-1) })
             .ShouldHaveValidationErrorFor(x => x.CancellationDate)
             .WithErrorMessage("'Cancellation Date' cannot be in the past.");
     }
 
     [Fact]
-    public void Cancellation_date_is_required()
+    public void GIVEN_no_cancellation_date_WHEN_validating_THEN_it_is_invalid()
     {
+        // Act & Assert
         _cancelValidator.TestValidate(new CancelPolicyRequest())
             .ShouldHaveValidationErrorFor(x => x.CancellationDate)
             .Only();
@@ -41,8 +44,9 @@ public sealed class CancelAndRenewRequestValidatorTests
     [InlineData("0.01")]
     [InlineData("340")]
     [InlineData("340.50")]
-    public void Renewal_amount_greater_than_zero_with_up_to_two_decimal_places_is_valid(string amount)
+    public void GIVEN_a_renewal_amount_above_zero_with_up_to_two_decimal_places_WHEN_validating_THEN_it_is_valid(string amount)
     {
+        // Act & Assert
         _renewValidator.TestValidate(new RenewPolicyRequest { Amount = Parse(amount), PaymentType = PaymentType.Card })
             .ShouldNotHaveAnyValidationErrors();
     }
@@ -52,23 +56,26 @@ public sealed class CancelAndRenewRequestValidatorTests
     [InlineData("0")]
     [InlineData("-5")]
     [InlineData("340.001")]
-    public void Missing_zero_negative_or_sub_penny_renewal_amount_is_invalid(string? amount)
+    public void GIVEN_a_missing_zero_negative_or_sub_penny_renewal_amount_WHEN_validating_THEN_it_is_invalid(string? amount)
     {
+        // Act & Assert
         _renewValidator.TestValidate(new RenewPolicyRequest { Amount = amount is null ? null : Parse(amount) })
             .ShouldHaveValidationErrorFor(x => x.Amount);
     }
 
     [Fact]
-    public void Renewal_payment_type_is_optional_at_request_level()
+    public void GIVEN_no_renewal_payment_type_WHEN_validating_the_request_THEN_it_is_valid()
     {
+        // Act & Assert
         // Whether it is required depends on the policy's auto-renew setting, checked by Policy.Renew.
         _renewValidator.TestValidate(new RenewPolicyRequest { Amount = 340m })
             .ShouldNotHaveAnyValidationErrors();
     }
 
     [Fact]
-    public void Undefined_renewal_payment_type_is_invalid()
+    public void GIVEN_an_undefined_renewal_payment_type_WHEN_validating_THEN_it_is_invalid()
     {
+        // Act & Assert
         _renewValidator.TestValidate(new RenewPolicyRequest { Amount = 340m, PaymentType = (PaymentType)99 })
             .ShouldHaveValidationErrorFor(x => x.PaymentType);
     }

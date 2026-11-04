@@ -12,10 +12,12 @@ public sealed class SellPolicyFunctionTests : IAsyncDisposable
     public ValueTask DisposeAsync() => _api.DisposeAsync();
 
     [Fact]
-    public async Task Selling_a_valid_policy_returns_201_with_location_and_policy()
+    public async Task GIVEN_a_valid_request_WHEN_selling_THEN_201_is_returned_with_the_location_and_policy()
     {
+        // Act
         var result = await _api.SellAsync(PolicyApiHarness.ValidBody("pol-0001"));
 
+        // Assert
         var created = result.ShouldBeOfType<CreatedResult>();
         created.Location.ShouldBe("/api/policies/POL-0001");
 
@@ -38,8 +40,9 @@ public sealed class SellPolicyFunctionTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task Selling_an_invalid_policy_returns_400_with_errors_for_each_invalid_field()
+    public async Task GIVEN_several_invalid_fields_WHEN_selling_THEN_400_lists_an_error_for_each()
     {
+        // Arrange
         var body = PolicyApiHarness.ValidBody();
         body["startDate"] = PolicyApiHarness.Today.AddDays(61).ToString("yyyy-MM-dd");
         body["amount"] = 0;
@@ -49,8 +52,10 @@ public sealed class SellPolicyFunctionTests : IAsyncDisposable
             new Dictionary<string, object?> { ["firstName"] = "Teen", ["lastName"] = "Ager", ["dateOfBirth"] = "2015-01-01" },
         };
 
+        // Act
         var result = await _api.SellAsync(body);
 
+        // Assert
         var badRequest = result.ShouldBeOfType<BadRequestObjectResult>();
         var problem = badRequest.Value.ShouldBeOfType<ValidationProblemDetails>();
         problem.Status.ShouldBe(StatusCodes.Status400BadRequest);
@@ -62,10 +67,12 @@ public sealed class SellPolicyFunctionTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task Selling_a_policy_with_missing_fields_reports_them_as_required()
+    public async Task GIVEN_an_empty_body_WHEN_selling_THEN_each_missing_field_is_reported_as_required()
     {
+        // Act
         var result = await _api.SellRawAsync("{}");
 
+        // Assert
         var problem = result.ShouldBeOfType<BadRequestObjectResult>().Value.ShouldBeOfType<ValidationProblemDetails>();
         problem.Errors.Keys.ShouldBe(
             ["Reference", "InsuranceType", "PaymentType", "Amount", "StartDate", "Property", "Policyholders"],
@@ -75,14 +82,17 @@ public sealed class SellPolicyFunctionTests : IAsyncDisposable
     [Theory]
     [InlineData(true, false)]
     [InlineData(false, true)]
-    public async Task Cheque_can_only_pay_for_a_policy_that_does_not_auto_renew(bool autoRenew, bool accepted)
+    public async Task GIVEN_a_cheque_payment_WHEN_selling_THEN_it_is_only_accepted_without_auto_renew(bool autoRenew, bool accepted)
     {
+        // Arrange
         var body = PolicyApiHarness.ValidBody();
         body["paymentType"] = "Cheque";
         body["autoRenew"] = autoRenew;
 
+        // Act
         var result = await _api.SellAsync(body);
 
+        // Assert
         if (accepted)
         {
             result.ShouldBeOfType<CreatedResult>();
@@ -95,12 +105,15 @@ public sealed class SellPolicyFunctionTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task Selling_a_duplicate_reference_returns_409()
+    public async Task GIVEN_an_existing_reference_WHEN_selling_THEN_409_is_returned()
     {
+        // Arrange
         await _api.SellAsync(PolicyApiHarness.ValidBody("POL-0001"));
 
+        // Act
         var result = await _api.SellAsync(PolicyApiHarness.ValidBody("pol-0001"));
 
+        // Assert
         var conflict = result.ShouldBeOfType<ObjectResult>();
         conflict.StatusCode.ShouldBe(StatusCodes.Status409Conflict);
         var problem = conflict.Value.ShouldBeOfType<ProblemDetails>();
@@ -114,10 +127,12 @@ public sealed class SellPolicyFunctionTests : IAsyncDisposable
     [InlineData("{\"insuranceType\": \"Car\"}", "$.insuranceType")]
     [InlineData("{\"paymentType\": \"Bitcoin\"}", "$.paymentType")]
     [InlineData("{\"policyholders\": [{\"dateOfBirth\": \"yesterday\"}]}", "$.policyholders[0].dateOfBirth")]
-    public async Task Invalid_field_value_returns_400_naming_the_field(string body, string expectedPath)
+    public async Task GIVEN_a_field_with_the_wrong_type_WHEN_selling_THEN_400_names_the_field(string body, string expectedPath)
     {
+        // Act
         var result = await _api.SellRawAsync(body);
 
+        // Assert
         var badRequest = result.ShouldBeOfType<ObjectResult>();
         badRequest.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
         var problem = badRequest.Value.ShouldBeOfType<ProblemDetails>();
@@ -127,30 +142,36 @@ public sealed class SellPolicyFunctionTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task Invalid_json_returns_400()
+    public async Task GIVEN_invalid_json_WHEN_selling_THEN_400_is_returned()
     {
+        // Act
         var result = await _api.SellRawAsync("{ not json");
 
+        // Assert
         var badRequest = result.ShouldBeOfType<ObjectResult>();
         badRequest.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
         badRequest.Value.ShouldBeOfType<ProblemDetails>().Title.ShouldBe("Malformed request body");
     }
 
     [Fact]
-    public async Task Null_body_returns_400()
+    public async Task GIVEN_a_null_body_WHEN_selling_THEN_400_is_returned()
     {
+        // Act
         var result = await _api.SellRawAsync("null");
 
+        // Assert
         var badRequest = result.ShouldBeOfType<ObjectResult>();
         badRequest.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
         badRequest.Value.ShouldBeOfType<ProblemDetails>().Title.ShouldBe("Missing request body");
     }
 
     [Fact]
-    public async Task Non_json_content_type_returns_415()
+    public async Task GIVEN_a_non_json_content_type_WHEN_selling_THEN_415_is_returned()
     {
+        // Act
         var result = await _api.SellRawAsync("reference=POL-1", "application/x-www-form-urlencoded");
 
+        // Assert
         result.ShouldBeOfType<ObjectResult>().StatusCode.ShouldBe(StatusCodes.Status415UnsupportedMediaType);
     }
 }

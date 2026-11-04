@@ -11,29 +11,34 @@ public sealed class SqlitePolicyRepositoryTests : IAsyncDisposable
     public ValueTask DisposeAsync() => _api.DisposeAsync();
 
     [Fact]
-    public async Task Database_rejects_a_duplicate_reference_that_slips_past_the_existence_check()
+    public async Task GIVEN_a_duplicate_reference_that_passed_the_existence_check_WHEN_adding_THEN_the_database_rejects_it()
     {
+        // Arrange
         // Simulates two concurrent requests: both checked ExistsAsync before either saved.
         (await AddInNewScopeAsync(NewPolicy("POL-RACE", "PAY-1"))).ShouldBeTrue();
 
+        // Act & Assert
         (await AddInNewScopeAsync(NewPolicy("POL-RACE", "PAY-2"))).ShouldBeFalse();
     }
 
     [Fact]
-    public async Task Exists_reflects_saved_policies()
+    public async Task GIVEN_a_saved_policy_WHEN_checking_existence_THEN_only_saved_references_exist()
     {
+        // Arrange
         await AddInNewScopeAsync(NewPolicy("POL-1", "PAY-1"));
 
         await using var scope = _api.Services.CreateAsyncScope();
         var repository = scope.ServiceProvider.GetRequiredService<IPolicyRepository>();
 
+        // Act & Assert
         (await repository.ExistsAsync("POL-1", TestContext.Current.CancellationToken)).ShouldBeTrue();
         (await repository.ExistsAsync("POL-2", TestContext.Current.CancellationToken)).ShouldBeFalse();
     }
 
     [Fact]
-    public async Task Saving_a_policy_that_another_request_changed_first_fails()
+    public async Task GIVEN_another_request_changed_the_policy_first_WHEN_saving_THEN_the_save_fails()
     {
+        // Arrange
         await AddInNewScopeAsync(NewPolicy("POL-1", "PAY-1"));
 
         // Two requests load the same policy before either saves.
@@ -47,9 +52,11 @@ public sealed class SqlitePolicyRepositoryTests : IAsyncDisposable
         firstCopy.Cancel(new DateOnly(2026, 6, 20), () => "REF-1").IsSuccess.ShouldBeTrue();
         secondCopy.Cancel(new DateOnly(2026, 6, 25), () => "REF-2").IsSuccess.ShouldBeTrue();
 
+        // Act
         (await firstRepository.SaveChangesAsync(TestContext.Current.CancellationToken)).ShouldBeTrue();
         (await secondRepository.SaveChangesAsync(TestContext.Current.CancellationToken)).ShouldBeFalse();
 
+        // Assert
         // Only the first cancellation, and its single refund, were stored.
         await using var check = _api.Services.CreateAsyncScope();
         var stored = await check.ServiceProvider.GetRequiredService<IPolicyRepository>()
@@ -59,11 +66,13 @@ public sealed class SqlitePolicyRepositoryTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task Renewal_terms_and_payments_are_persisted()
+    public async Task GIVEN_a_renewed_policy_WHEN_saving_and_reloading_THEN_its_terms_and_payments_are_persisted()
     {
+        // Arrange
         var policy = NewPolicy("POL-1", "PAY-1", autoRenew: true);
         await AddInNewScopeAsync(policy);
 
+        // Act
         await using (var scope = _api.Services.CreateAsyncScope())
         {
             var repository = scope.ServiceProvider.GetRequiredService<IPolicyRepository>();
@@ -72,6 +81,7 @@ public sealed class SqlitePolicyRepositoryTests : IAsyncDisposable
             (await repository.SaveChangesAsync(TestContext.Current.CancellationToken)).ShouldBeTrue();
         }
 
+        // Assert
         await using var check = _api.Services.CreateAsyncScope();
         var stored = (await check.ServiceProvider.GetRequiredService<IPolicyRepository>()
             .GetByReferenceAsync("POL-1", TestContext.Current.CancellationToken)).ShouldNotBeNull();
