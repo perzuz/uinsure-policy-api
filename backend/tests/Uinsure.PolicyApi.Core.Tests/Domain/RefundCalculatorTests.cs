@@ -10,8 +10,9 @@ public sealed class RefundCalculatorTests
     [Theory]
     [InlineData("2026-06-01")]
     [InlineData("2026-06-30")]
-    public void Cancelling_before_the_term_starts_refunds_in_full(string cancellationDate)
+    public void GIVEN_a_date_before_the_term_starts_WHEN_calculating_the_refund_THEN_it_is_in_full(string cancellationDate)
     {
+        // Act & Assert
         Refund(cancellationDate).ShouldBe(365.00m);
     }
 
@@ -19,8 +20,9 @@ public sealed class RefundCalculatorTests
     [InlineData("2026-07-01")] // start date
     [InlineData("2026-07-08")]
     [InlineData("2026-07-14")] // 14th day of cover, the last day of cooling off
-    public void Cancelling_within_the_14_day_cooling_off_period_refunds_in_full(string cancellationDate)
+    public void GIVEN_a_date_within_the_14_day_cooling_off_period_WHEN_calculating_the_refund_THEN_it_is_in_full(string cancellationDate)
     {
+        // Act & Assert
         Refund(cancellationDate).ShouldBe(365.00m);
     }
 
@@ -28,25 +30,29 @@ public sealed class RefundCalculatorTests
     [InlineData("2026-07-15", 351.00)] // first day after cooling off
     [InlineData("2026-10-09", 265.00)] // 100 days used
     [InlineData("2027-06-30", 1.00)] // last day of cover
-    public void Cancelling_after_cooling_off_refunds_the_unused_days_pro_rata(string cancellationDate, decimal expected)
+    public void GIVEN_a_date_after_cooling_off_WHEN_calculating_the_refund_THEN_the_unused_days_are_refunded_pro_rata(string cancellationDate, decimal expected)
     {
+        // Act & Assert
         Refund(cancellationDate).ShouldBe(expected);
     }
 
     [Theory]
     [InlineData("2027-07-01")] // end date
     [InlineData("2027-08-01")]
-    public void Cancelling_on_or_after_the_end_date_refunds_nothing(string cancellationDate)
+    public void GIVEN_a_date_on_or_after_the_end_date_WHEN_calculating_the_refund_THEN_it_is_zero(string cancellationDate)
     {
+        // Act & Assert
         Refund(cancellationDate).ShouldBe(0m);
     }
 
     [Fact]
-    public void Pro_rata_uses_the_actual_length_of_a_leap_year_term()
+    public void GIVEN_a_leap_year_term_WHEN_calculating_a_pro_rata_refund_THEN_366_days_are_used()
     {
+        // Arrange
         // 2027-07-01 to 2028-07-01 includes 29 February 2028, so it is 366 days.
         var leapTerm = new PolicyTerm(1, new DateOnly(2027, 7, 1), 366.00m);
 
+        // Act & Assert
         leapTerm.LengthInDays.ShouldBe(366);
         RefundCalculator.Calculate(leapTerm, 366.00m, new DateOnly(2027, 10, 9)).ShouldBe(266.00m);
     }
@@ -54,8 +60,9 @@ public sealed class RefundCalculatorTests
     [Theory]
     [InlineData("2026-07-15", 96.16)] // 100 x 351 / 365 = 96.1643...
     [InlineData("2026-12-12", 55.07)] // 100 x 201 / 365 = 55.0684...
-    public void Pro_rata_refunds_are_rounded_to_the_nearest_penny(string cancellationDate, decimal expected)
+    public void GIVEN_an_uneven_pro_rata_amount_WHEN_calculating_the_refund_THEN_it_is_rounded_to_the_nearest_penny(string cancellationDate, decimal expected)
     {
+        // Act & Assert
         RefundCalculator.Calculate(Term, 100.00m, DateOnly.Parse(cancellationDate)).ShouldBe(expected);
     }
 

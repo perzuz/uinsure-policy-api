@@ -32,12 +32,15 @@ public sealed class PolicyServiceTests
     // --- Sell ---
 
     [Fact]
-    public async Task Selling_a_valid_policy_saves_and_returns_it()
+    public async Task GIVEN_a_valid_request_WHEN_selling_THEN_the_policy_is_saved_and_returned()
     {
+        // Arrange
         var request = TestData.ValidRequest();
 
+        // Act
         var result = await _service.SellAsync(request, TestContext.Current.CancellationToken);
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.Success);
         var policy = result.Value.ShouldNotBeNull();
         policy.Reference.ShouldBe("POL-0001");
@@ -51,12 +54,15 @@ public sealed class PolicyServiceTests
     }
 
     [Fact]
-    public async Task Selling_a_policy_creates_a_payment_for_the_full_amount_using_the_chosen_method()
+    public async Task GIVEN_a_valid_request_WHEN_selling_THEN_a_payment_is_taken_for_the_full_amount_by_the_chosen_method()
     {
+        // Arrange
         var request = TestData.ValidRequest() with { PaymentType = PaymentType.DirectDebit, Amount = 321.45m };
 
+        // Act
         var result = await _service.SellAsync(request, TestContext.Current.CancellationToken);
 
+        // Assert
         var payment = result.Value.ShouldNotBeNull().Payments.ShouldHaveSingleItem();
         payment.PaymentReference.ShouldBe("PAY-TEST0001");
         payment.Type.ShouldBe(PaymentType.DirectDebit);
@@ -65,12 +71,15 @@ public sealed class PolicyServiceTests
     }
 
     [Fact]
-    public async Task Selling_an_invalid_policy_returns_validation_errors_and_saves_nothing()
+    public async Task GIVEN_an_invalid_request_WHEN_selling_THEN_validation_errors_are_returned_and_nothing_is_saved()
     {
+        // Arrange
         var request = TestData.ValidRequest() with { StartDate = TestData.Today.AddDays(61), Policyholders = [] };
 
+        // Act
         var result = await _service.SellAsync(request, TestContext.Current.CancellationToken);
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.ValidationFailed);
         result.ValidationErrors.Keys.ShouldBe(["StartDate", "Policyholders"], ignoreOrder: true);
         _repository.Policies.ShouldBeEmpty();
@@ -80,26 +89,32 @@ public sealed class PolicyServiceTests
     [InlineData("POL-0001")]
     [InlineData("pol-0001")]
     [InlineData(" Pol-0001 ")]
-    public async Task Selling_a_policy_with_an_existing_reference_returns_conflict(string duplicateReference)
+    public async Task GIVEN_an_existing_reference_WHEN_selling_THEN_conflict_is_returned(string duplicateReference)
     {
+        // Arrange
         await SellAsync();
 
+        // Act
         var result = await _service.SellAsync(
             TestData.ValidRequest() with { Reference = duplicateReference },
             TestContext.Current.CancellationToken);
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.Conflict);
         result.Error.ShouldBe("A policy with reference 'POL-0001' already exists.");
         _repository.Policies.Count.ShouldBe(1);
     }
 
     [Fact]
-    public async Task Losing_a_race_to_insert_the_same_reference_returns_conflict()
+    public async Task GIVEN_another_request_inserts_the_same_reference_first_WHEN_selling_THEN_conflict_is_returned()
     {
+        // Arrange
         _repository.RejectNextAdd = true;
 
+        // Act
         var result = await _service.SellAsync(TestData.ValidRequest(), TestContext.Current.CancellationToken);
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.Conflict);
     }
 
@@ -108,21 +123,26 @@ public sealed class PolicyServiceTests
     [Theory]
     [InlineData("POL-0001")]
     [InlineData("pol-0001")]
-    public async Task Retrieving_an_existing_policy_returns_it(string reference)
+    public async Task GIVEN_an_existing_policy_WHEN_retrieving_it_THEN_it_is_returned(string reference)
     {
+        // Arrange
         await SellAsync();
 
+        // Act
         var result = await _service.GetAsync(reference, TestContext.Current.CancellationToken);
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.Success);
         result.Value.ShouldNotBeNull().Reference.ShouldBe("POL-0001");
     }
 
     [Fact]
-    public async Task Retrieving_an_unknown_policy_returns_not_found()
+    public async Task GIVEN_an_unknown_reference_WHEN_retrieving_THEN_not_found_is_returned()
     {
+        // Act
         var result = await _service.GetAsync("missing", TestContext.Current.CancellationToken);
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.NotFound);
         result.Value.ShouldBeNull();
         result.Error.ShouldBe("No policy found with reference 'MISSING'.");
@@ -131,12 +151,15 @@ public sealed class PolicyServiceTests
     // --- Cancel ---
 
     [Fact]
-    public async Task Cancelling_a_policy_saves_it_as_cancelled_with_its_refund()
+    public async Task GIVEN_an_active_policy_WHEN_cancelling_THEN_it_is_saved_as_cancelled_with_its_refund()
     {
+        // Arrange
         await SellAsync();
 
+        // Act
         var result = await CancelAsync("pol-0001", TestData.Today);
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.Success);
         var policy = result.Value.ShouldNotBeNull();
         policy.Status.ShouldBe(PolicyStatus.Cancelled);
@@ -149,69 +172,86 @@ public sealed class PolicyServiceTests
     }
 
     [Fact]
-    public async Task Cancelling_requires_a_cancellation_date()
+    public async Task GIVEN_no_cancellation_date_WHEN_cancelling_THEN_validation_fails_and_nothing_is_saved()
     {
+        // Arrange
         await SellAsync();
 
+        // Act
         var result = await _service.CancelAsync("POL-0001", new CancelPolicyRequest(), TestContext.Current.CancellationToken);
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.ValidationFailed);
         result.ValidationErrors.Keys.ShouldBe(["CancellationDate"]);
         _repository.SaveCount.ShouldBe(0);
     }
 
     [Fact]
-    public async Task Cancelling_from_a_past_date_is_invalid()
+    public async Task GIVEN_a_past_date_WHEN_cancelling_THEN_validation_fails()
     {
+        // Arrange
         await SellAsync();
 
+        // Act
         var result = await CancelAsync("POL-0001", TestData.Today.AddDays(-1));
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.ValidationFailed);
         result.ValidationErrors["CancellationDate"].ShouldBe(["'Cancellation Date' cannot be in the past."]);
     }
 
     [Fact]
-    public async Task Cancelling_from_after_the_end_date_is_invalid()
+    public async Task GIVEN_a_date_after_the_end_date_WHEN_cancelling_THEN_validation_fails_and_nothing_is_saved()
     {
+        // Arrange
         await SellAsync();
 
+        // Act
         var result = await CancelAsync("POL-0001", PolicyEnd.AddDays(1));
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.ValidationFailed);
         result.ValidationErrors["CancellationDate"].ShouldBe(["'Cancellation Date' cannot be after the policy end date (2027-06-22)."]);
         _repository.SaveCount.ShouldBe(0);
     }
 
     [Fact]
-    public async Task Cancelling_an_unknown_policy_returns_not_found()
+    public async Task GIVEN_an_unknown_reference_WHEN_cancelling_THEN_not_found_is_returned()
     {
+        // Act
         var result = await CancelAsync("missing", TestData.Today);
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.NotFound);
         result.Error.ShouldBe("No policy found with reference 'MISSING'.");
     }
 
     [Fact]
-    public async Task Cancelling_an_already_cancelled_policy_returns_conflict()
+    public async Task GIVEN_a_cancelled_policy_WHEN_cancelling_again_THEN_conflict_is_returned()
     {
+        // Arrange
         await SellAsync();
         await CancelAsync("POL-0001", TestData.Today);
 
+        // Act
         var result = await CancelAsync("POL-0001", TestData.Today.AddDays(1));
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.Conflict);
         result.Error.ShouldBe("The policy has already been cancelled from 2026-06-15.");
     }
 
     [Fact]
-    public async Task A_concurrent_change_returns_conflict()
+    public async Task GIVEN_another_request_changed_the_policy_first_WHEN_saving_THEN_conflict_is_returned()
     {
+        // Arrange
         await SellAsync();
         _repository.FailNextSave = true;
 
+        // Act
         var result = await CancelAsync("POL-0001", TestData.Today);
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.Conflict);
         result.Error.ShouldBe("Policy 'POL-0001' was changed by another request. Retrieve it and try again.");
     }
@@ -219,13 +259,16 @@ public sealed class PolicyServiceTests
     // --- Renew ---
 
     [Fact]
-    public async Task Renewing_within_the_window_adds_a_term_and_takes_a_payment_for_an_auto_renewing_policy()
+    public async Task GIVEN_an_auto_renewing_policy_in_its_window_WHEN_renewing_THEN_a_term_is_added_and_a_payment_taken()
     {
+        // Arrange
         await SellAsync();
         SetToday(PolicyEnd.AddDays(-10));
 
+        // Act
         var result = await RenewAsync("POL-0001", 300.00m, PaymentType.DirectDebit);
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.Success);
         var policy = result.Value.ShouldNotBeNull();
         policy.Terms.Count.ShouldBe(2);
@@ -240,25 +283,31 @@ public sealed class PolicyServiceTests
     }
 
     [Fact]
-    public async Task Renewing_a_policy_that_does_not_auto_renew_takes_no_payment()
+    public async Task GIVEN_a_policy_that_does_not_auto_renew_WHEN_renewing_THEN_no_payment_is_taken()
     {
+        // Arrange
         await SellAsync(TestData.ValidRequest() with { AutoRenew = false });
         SetToday(PolicyEnd);
 
+        // Act
         var result = await RenewAsync("POL-0001", 300.00m, paymentType: null);
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.Success);
         result.Value.ShouldNotBeNull().Terms.Count.ShouldBe(2);
         result.Value.Payments.ShouldHaveSingleItem().TermNumber.ShouldBe(1);
     }
 
     [Fact]
-    public async Task Renewing_before_the_window_opens_returns_conflict()
+    public async Task GIVEN_the_renewal_window_has_not_opened_WHEN_renewing_THEN_conflict_is_returned_and_nothing_is_saved()
     {
+        // Arrange
         await SellAsync();
 
+        // Act
         var result = await RenewAsync("POL-0001", 300.00m, PaymentType.Card);
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.Conflict);
         result.Error.ShouldBe(
             "A policy can only be renewed in the 30 days before its end date. This policy can be renewed from 2027-05-23.");
@@ -266,13 +315,16 @@ public sealed class PolicyServiceTests
     }
 
     [Fact]
-    public async Task Renewing_an_auto_renewing_policy_requires_a_payment_type()
+    public async Task GIVEN_an_auto_renewing_policy_WHEN_renewing_without_a_payment_type_THEN_validation_fails()
     {
+        // Arrange
         await SellAsync();
         SetToday(PolicyEnd.AddDays(-10));
 
+        // Act
         var result = await RenewAsync("POL-0001", 300.00m, paymentType: null);
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.ValidationFailed);
         result.ValidationErrors.Keys.ShouldBe(["PaymentType"]);
         _repository.SaveCount.ShouldBe(0);
@@ -282,32 +334,40 @@ public sealed class PolicyServiceTests
     [InlineData(null)]
     [InlineData("0")]
     [InlineData("10.001")]
-    public async Task Renewing_requires_a_valid_amount(string? amount)
+    public async Task GIVEN_a_missing_or_invalid_amount_WHEN_renewing_THEN_validation_fails(string? amount)
     {
+        // Arrange
         await SellAsync();
 
+        // Act
         var result = await RenewAsync("POL-0001", amount is null ? null : decimal.Parse(amount, System.Globalization.CultureInfo.InvariantCulture), PaymentType.Card);
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.ValidationFailed);
         result.ValidationErrors.Keys.ShouldBe(["Amount"]);
     }
 
     [Fact]
-    public async Task Renewing_an_unknown_policy_returns_not_found()
+    public async Task GIVEN_an_unknown_reference_WHEN_renewing_THEN_not_found_is_returned()
     {
+        // Act
         var result = await RenewAsync("missing", 300.00m, PaymentType.Card);
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.NotFound);
     }
 
     [Fact]
-    public async Task Renewing_an_auto_renewing_policy_by_cheque_is_invalid()
+    public async Task GIVEN_an_auto_renewing_policy_WHEN_renewing_by_cheque_THEN_validation_fails_and_nothing_is_saved()
     {
+        // Arrange
         await SellAsync();
         SetToday(PolicyEnd.AddDays(-10));
 
+        // Act
         var result = await RenewAsync("POL-0001", 300.00m, PaymentType.Cheque);
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.ValidationFailed);
         result.ValidationErrors["PaymentType"].ShouldBe([PolicyRules.AutoRenewByChequeError]);
         _repository.SaveCount.ShouldBe(0);
@@ -316,12 +376,15 @@ public sealed class PolicyServiceTests
     // --- Cancellation quote ---
 
     [Fact]
-    public async Task Quoting_a_cancellation_returns_the_refunds_without_saving()
+    public async Task GIVEN_an_active_policy_WHEN_quoting_a_cancellation_THEN_the_refunds_are_returned_without_saving()
     {
+        // Arrange
         await SellAsync();
 
+        // Act
         var result = await QuoteAsync("pol-0001", TestData.Today);
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.Success);
         var quote = result.Value.ShouldNotBeNull();
         quote.Reference.ShouldBe("POL-0001");
@@ -333,53 +396,67 @@ public sealed class PolicyServiceTests
     }
 
     [Fact]
-    public async Task Quoting_without_a_date_quotes_for_today()
+    public async Task GIVEN_no_date_WHEN_quoting_a_cancellation_THEN_it_is_quoted_for_today()
     {
+        // Arrange
         await SellAsync();
 
+        // Act
         var result = await QuoteAsync("POL-0001", null);
 
+        // Assert
         result.Value.ShouldNotBeNull().CancellationDate.ShouldBe(TestData.Today);
     }
 
     [Fact]
-    public async Task Quoting_for_a_past_date_is_invalid()
+    public async Task GIVEN_a_past_date_WHEN_quoting_a_cancellation_THEN_validation_fails()
     {
+        // Arrange
         await SellAsync();
 
+        // Act
         var result = await QuoteAsync("POL-0001", TestData.Today.AddDays(-1));
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.ValidationFailed);
         result.ValidationErrors["CancellationDate"].ShouldBe(["'Cancellation Date' cannot be in the past."]);
     }
 
     [Fact]
-    public async Task Quoting_for_after_the_end_date_is_invalid()
+    public async Task GIVEN_a_date_after_the_end_date_WHEN_quoting_a_cancellation_THEN_validation_fails()
     {
+        // Arrange
         await SellAsync();
 
+        // Act
         var result = await QuoteAsync("POL-0001", PolicyEnd.AddDays(1));
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.ValidationFailed);
         result.ValidationErrors.Keys.ShouldBe(["CancellationDate"]);
     }
 
     [Fact]
-    public async Task Quoting_for_a_cancelled_policy_returns_conflict()
+    public async Task GIVEN_a_cancelled_policy_WHEN_quoting_a_cancellation_THEN_conflict_is_returned()
     {
+        // Arrange
         await SellAsync();
         await CancelAsync("POL-0001", TestData.Today);
 
+        // Act
         var result = await QuoteAsync("POL-0001", TestData.Today);
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.Conflict);
     }
 
     [Fact]
-    public async Task Quoting_for_an_unknown_policy_returns_not_found()
+    public async Task GIVEN_an_unknown_reference_WHEN_quoting_a_cancellation_THEN_not_found_is_returned()
     {
+        // Act
         var result = await QuoteAsync("missing", TestData.Today);
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.NotFound);
         result.Error.ShouldBe("No policy found with reference 'MISSING'.");
     }
@@ -387,12 +464,15 @@ public sealed class PolicyServiceTests
     // --- Claims ---
 
     [Fact]
-    public async Task Recording_a_claim_saves_it_and_removes_any_refund()
+    public async Task GIVEN_an_active_policy_WHEN_recording_a_claim_THEN_it_is_saved_and_the_quote_drops_to_zero()
     {
+        // Arrange
         await SellAsync();
 
+        // Act
         var result = await _service.RecordClaimAsync("pol-0001", TestContext.Current.CancellationToken);
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.Success);
         result.Value.ShouldNotBeNull().HasClaims.ShouldBeTrue();
         _repository.SaveCount.ShouldBe(1);
@@ -404,22 +484,27 @@ public sealed class PolicyServiceTests
     }
 
     [Fact]
-    public async Task Recording_a_claim_on_a_cancelled_policy_returns_conflict()
+    public async Task GIVEN_a_cancelled_policy_WHEN_recording_a_claim_THEN_conflict_is_returned()
     {
+        // Arrange
         await SellAsync();
         await CancelAsync("POL-0001", TestData.Today);
 
+        // Act
         var result = await _service.RecordClaimAsync("POL-0001", TestContext.Current.CancellationToken);
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.Conflict);
         result.Error.ShouldBe("A claim cannot be recorded on a cancelled policy.");
     }
 
     [Fact]
-    public async Task Recording_a_claim_on_an_unknown_policy_returns_not_found()
+    public async Task GIVEN_an_unknown_reference_WHEN_recording_a_claim_THEN_not_found_is_returned()
     {
+        // Act
         var result = await _service.RecordClaimAsync("missing", TestContext.Current.CancellationToken);
 
+        // Assert
         result.Status.ShouldBe(ServiceResultStatus.NotFound);
     }
 
