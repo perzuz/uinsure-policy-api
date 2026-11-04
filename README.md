@@ -1,8 +1,19 @@
 # Uinsure Policy API
 
-A REST API for selling, retrieving, cancelling and renewing home insurance policies. It's built with C# on **.NET 10 isolated-process Azure Functions**.
+A REST API for selling, retrieving, cancelling and renewing home insurance policies, built with C# on **.NET 10 isolated-process Azure Functions**.
 
-It delivers all of the MoSCoW requirements: **Must**, **Should** and **Could**.
+## Quick start
+
+```bash
+cd backend && dotnet test                                 # no setup needed
+cd src/Uinsure.PolicyApi.Functions && dotnet run          # needs Azure Functions Core Tools 4.16+
+```
+
+Then open Swagger UI at http://localhost:7071/api/swagger/ui.
+
+## What's delivered
+
+All of the MoSCoW requirements: **Must**, **Should** and **Could**.
 
 | Priority | Requirement | Endpoint |
 |---|---|---|
@@ -14,6 +25,14 @@ It delivers all of the MoSCoW requirements: **Must**, **Should** and **Could**.
 | Could | No refund for a policy with claims | `POST /api/policies/{reference}/claims` records a claim |
 | Could | No auto renewal paid by cheque | Enforced on sell and renew |
 
+Request and response details, status codes and examples are in [docs/API.md](docs/API.md) and in Swagger.
+
+## Approach
+
+I treated the MoSCoW list as a delivery order. I built the Musts end to end first (domain, validation, persistence, HTTP, tests), then the Shoulds, then the Coulds, so there was a working, tested API at every stage that could have shipped.
+
+The infrastructure is deliberately simple (SQLite, anonymous endpoints) so a reviewer can clone and run it with no database or emulator to set up.
+
 ## Repository layout
 
 ```
@@ -22,179 +41,46 @@ backend/
     Uinsure.PolicyApi.Core/            Domain model, business rules, validation, application service
     Uinsure.PolicyApi.Infrastructure/  EF Core + SQLite persistence
     Uinsure.PolicyApi.Functions/       Azure Functions HTTP layer (thin: parse → service → map to HTTP)
-      Policies/                        One file per function: SellPolicyFunction.cs, GetPolicyFunction.cs, …
-      Http/                            Shared request parsing and Problem Details responses
-      OpenApi/                         Swagger configuration and request examples
   tests/
     Uinsure.PolicyApi.Core.Tests/      Unit tests: validation rules, domain, service
     Uinsure.PolicyApi.Functions.Tests/ Integration tests: functions + real services + in-memory SQLite
   requests.http                        Sample requests for manual testing
-frontend/                              Placeholder for a future web client
+docs/
+  API.md                               Full API reference
 ```
 
-## Getting started
+## Running it
 
 ### Prerequisites
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
-- [Azure Functions Core Tools](https://learn.microsoft.com/azure/azure-functions/functions-run-local) **4.x, a recent build**. This is only needed to run the API, not the tests. Install it with `npm i -g azure-functions-core-tools@4`. Older builds, such as the one the winget package currently installs (4.0.5382), fail at startup with `Configuration is missing the 'HostEndpoint'`.
+- [Azure Functions Core Tools](https://learn.microsoft.com/azure/azure-functions/functions-run-local) **4.16 or later**, to run the API (not needed for the tests). Install it with `npm i -g azure-functions-core-tools@4` and check with `func --version`. Older builds, such as the winget package, fail at startup.
 
-No database server or storage emulator is needed. Policies are stored in a local SQLite file (`policies.db`), which is created on first run.
+No database server or storage emulator is needed. Policies are stored in a local SQLite file (`policies.db`), created on first run.
 
-> **Upgrading from an earlier version?** Cancel and Renew changed the database schema (policy terms, status, refunds per term). The schema is created with `EnsureCreated()`, which doesn't alter an existing database, so delete the old `policies.db` from the Functions project's `bin` folders once.
-
-### Run the tests
+### Tests
 
 ```bash
 cd backend
 dotnet test
+dotnet test --settings coverage.runsettings   # with coverage, excluding source-generated code
 ```
 
-With coverage (excludes Functions source-generated code):
-
-```bash
-dotnet test --settings coverage.runsettings
-```
-
-### Run the API
+### API
 
 ```bash
 cd backend/src/Uinsure.PolicyApi.Functions
-func start
+dotnet run
 ```
 
-The API listens on `http://localhost:7071/api`. Use [`backend/requests.http`](backend/requests.http) to send example requests. Adjust `startDate` so it falls within 60 days of today.
+The API listens on `http://localhost:7071/api`.
 
-#### Trying date-dependent rules (`TimeOverride__Today`)
+- **Swagger UI:** http://localhost:7071/api/swagger/ui. The sell example uses a start date two weeks from today, so **Try it out** works without editing.
+- **Sample requests:** [`backend/requests.http`](backend/requests.http) has a scripted walkthrough (sell → get → quote → cancel, plus the cheque and claim cases). Open it in Visual Studio, Rider, or VS Code with the REST Client extension, and send each request (**Send Request**) from top to bottom. Adjust `startDate` so it falls within 60 days of today.
 
-A new policy can't be renewed until 30 days before it ends, which is at least ten months away. To try renewal (or late cancellations) by hand, set `TimeOverride__Today` in `local.settings.json` to a date in `yyyy-MM-dd` form, then restart the API. For example, sell a policy starting `2026-11-20`, then restart with `"TimeOverride__Today": "2027-11-05"` and renew it. The API prints a warning at startup while the override is active. Leave it empty for normal use; it is a local demo aid only.
+### Trying date-dependent rules (`TimeOverride__Today`)
 
-### API documentation (Swagger)
-
-With the API running:
-
-- **Swagger UI:** http://localhost:7071/api/swagger/ui
-- **OpenAPI 3 document:** http://localhost:7071/api/openapi/v3.json (or `/api/swagger.json` for Swagger 2.0)
-
-Swagger is generated by Microsoft's [Azure Functions OpenAPI extension](https://github.com/Azure/azure-functions-openapi-extension) from `[OpenApi…]` attributes on each function. The request example uses a start date two weeks from today, so **Try it out** works without editing.
-
-The extension predates .NET's System.Text.Json and `DateOnly`, so two adjustments make the docs match the real API:
-
-- `InsuranceType`, `PaymentType` and `PolicyStatus` also carry Newtonsoft's `StringEnumConverter` attribute. The extension reads it to document the enums by name; the API itself still serialises with System.Text.Json.
-- `DateOnlySchemaFilter` documents `DateOnly` as an ISO date string (`2026-11-20`) instead of a `{year, month, day…}` object.
-
-## API
-
-### Sell a policy: `POST /api/policies`
-
-```json
-{
-  "reference": "POL-0001",
-  "insuranceType": "Household",
-  "startDate": "2026-11-20",
-  "amount": 325.50,
-  "autoRenew": true,
-  "paymentType": "Card",
-  "property": {
-    "addressLine1": "1 High Street",
-    "addressLine2": "Little Town",
-    "addressLine3": null,
-    "postcode": "AB1 2CD"
-  },
-  "policyholders": [
-    { "firstName": "Jane", "lastName": "Smith", "dateOfBirth": "1985-04-12" }
-  ]
-}
-```
-
-- `insuranceType` is `Household` or `BuyToLet`.
-- `paymentType` is `Card`, `DirectDebit` or `Cheque`. `Cheque` is only allowed when `autoRenew` is `false`.
-
-| Status | When |
-|---|---|
-| `201 Created` | Policy sold. The body is the policy, including its generated payment, and the `Location` header points to it. |
-| `400 Bad Request` | A business rule failed. The response is a `ValidationProblemDetails` with the errors keyed by field, e.g. `StartDate`, `Property.Postcode`, `Policyholders[0]`. |
-| `400 Bad Request` | The body isn't valid JSON, or a field has the wrong type or format. The `ProblemDetails` names the offending JSON path. |
-| `409 Conflict` | A policy with this reference already exists. |
-| `415 Unsupported Media Type` | The body isn't sent as `application/json`. |
-
-### Retrieve a policy: `GET /api/policies/{reference}`
-
-| Status | When |
-|---|---|
-| `200 OK` | The policy, with its property, policyholders, terms, payments and refunds. |
-| `404 Not Found` | No policy with that reference (`ProblemDetails`). |
-
-A policy is made up of one-year **terms**: term 1 when it's sold, plus one for each renewal. The top-level `startDate`, `endDate` and `amount` describe the latest term. The `terms` array has the full history, and each payment and refund names the `termNumber` it belongs to. `status` is `Active` or `Cancelled`.
-
-### Cancel a policy: `POST /api/policies/{reference}/cancel`
-
-```json
-{ "cancellationDate": "2027-02-28" }
-```
-
-Cancels the policy from the given date (today or later, and no later than the end date). Each paid term is refunded to the same method as its payment:
-
-- **Before the term starts:** a full refund.
-- **Within the first 14 days of the term (cooling off):** a full refund.
-- **After that:** pro rata, `amount × unused days ÷ days in the term`, rounded to the nearest penny.
-
-| Status | When |
-|---|---|
-| `200 OK` | Cancelled. The body is the policy, with `status: "Cancelled"` and its `refunds`. |
-| `400 Bad Request` | The date is missing, in the past or after the end date, or the body isn't valid JSON. |
-| `404 Not Found` | No policy with that reference. |
-| `409 Conflict` | The policy is already cancelled, or was changed by another request at the same time. |
-| `415 Unsupported Media Type` | The body isn't sent as `application/json`. |
-
-### Renew a policy: `POST /api/policies/{reference}/renew`
-
-```json
-{ "amount": 340.00, "paymentType": "Card" }
-```
-
-Adds a new one-year term starting on the current end date, for the given premium. It's allowed from 30 days before the end date up to and including the end date. If the policy is set to auto renew, a payment is taken for the new term, so `paymentType` is required. Otherwise no payment is created and `paymentType` can be left out.
-
-| Status | When |
-|---|---|
-| `200 OK` | Renewed. The body is the policy with the new term, plus its payment if one was taken. |
-| `400 Bad Request` | The amount is invalid, `paymentType` is missing or `Cheque` for an auto-renewing policy, or the body isn't valid JSON. |
-| `404 Not Found` | No policy with that reference. |
-| `409 Conflict` | Outside the renewal window (the message says when it opens), already renewed, cancelled, or changed by another request. |
-| `415 Unsupported Media Type` | The body isn't sent as `application/json`. |
-
-### Quote the cost of cancelling: `GET /api/policies/{reference}/cancellation-quote?cancellationDate=2027-02-28`
-
-Returns the refunds cancelling on that date would give, using exactly the same calculation as cancelling, without changing the policy. `cancellationDate` is optional and defaults to today; it follows the same rules as cancel.
-
-```json
-{
-  "reference": "POL-0001",
-  "cancellationDate": "2027-02-28",
-  "hasClaims": false,
-  "totalRefund": 265.00,
-  "refunds": [ { "termNumber": 1, "type": "Card", "amount": 265.00 } ]
-}
-```
-
-| Status | When |
-|---|---|
-| `200 OK` | The quote. `refunds` is empty (and `totalRefund` is 0) if the policy has claims or nothing is refundable. |
-| `400 Bad Request` | The date isn't `yyyy-MM-dd`, is in the past, or is after the end date. |
-| `404 Not Found` | No policy with that reference. |
-| `409 Conflict` | The policy is already cancelled. |
-
-### Record a claim: `POST /api/policies/{reference}/claims`
-
-No body. Marks the policy as having claims (`hasClaims: true`). From then on, cancelling it gives no refund.
-
-| Status | When |
-|---|---|
-| `200 OK` | Claim recorded. The body is the policy. Recording another claim changes nothing. |
-| `404 Not Found` | No policy with that reference. |
-| `409 Conflict` | The policy is cancelled, or was changed by another request at the same time. |
-
-All errors use [RFC 9457 Problem Details](https://www.rfc-editor.org/rfc/rfc9457) (`application/problem+json`). Invalid input returns `400`, and a request that conflicts with the policy's current state returns `409`.
+A new policy can't be renewed until 30 days before it ends, which is at least ten months away. To try renewal (or late cancellations) by hand, set `TimeOverride__Today` in `local.settings.json` to a `yyyy-MM-dd` date and restart the API. For example, sell a policy starting `2026-11-20`, then restart with `"TimeOverride__Today": "2027-11-05"` and renew it. The API prints a warning at startup while the override is active. It is a local demo aid only; leave it empty for normal use.
 
 ## Business rules implemented
 
@@ -226,45 +112,44 @@ When cancelling a policy:
 
 The rule constants live in one place, [`PolicyRules`](backend/src/Uinsure.PolicyApi.Core/Domain/PolicyRules.cs), so validation, the domain model and the database schema agree.
 
-## Assumptions
+## Assumptions and interpretations of the brief
 
-1. **60 days in advance.** The start date must be between today and today + 60 days, both inclusive. Start dates in the past are rejected.
-2. **1 year in length.** End date = start date + 1 calendar year (e.g. 2026-11-20 → 2027-11-20). The server calculates it, so a consumer can't supply an inconsistent end date. A policy starting on 29 Feb ends on 28 Feb.
-3. **"Over 16".** This is interpreted as aged 16 or older on the start date, so a policyholder whose 16th birthday is the start date is accepted. Someone born on 29 Feb turns a year older on 1 March in non-leap years (UK convention).
-4. **References.** The consumer supplies the policy reference (max 20 characters). It is case-insensitive and stored in upper case, so `pol-1` and `POL-1` are the same policy. Payment references are generated by the server.
-5. **Amount.** The amount is the annual premium, supplied by the consumer. It must be greater than 0 with at most 2 decimal places. Pricing is out of scope.
-6. **Payment at sale.** Selling a policy takes one payment for the full amount, using the payment method in the request.
-7. **Insurance type.** Household / Buy to Let is stored on the policy. No rules differ between the two types yet.
-8. **Has claims.** A new policy always starts with `hasClaims: false`. It becomes `true` when a claim is recorded through `POST /claims`.
-9. **Postcode.** It is trimmed and upper-cased, then validated for presence and length (≤ 8) only. There is no full UK postcode format check, to avoid rejecting valid edge cases.
-10. **Field lengths.** These are not in the spec: names and address lines are limited to 100 characters each.
-11. **"Today".** This is the current UTC date. Time is injected through `TimeProvider`, so date rules are fully testable.
-12. **Auth.** Endpoints use `AuthorizationLevel.Anonymous` so reviewers can call them easily. A real deployment would use function keys, Entra ID or APIM.
-13. **Persistence.** SQLite with `EnsureCreated()` is used instead of migrations, which is appropriate for a take-home exercise. Swapping to SQL Server, Cosmos DB or Table Storage only means implementing `IPolicyRepository`.
-14. **Renewal window.** "Can only be renewed 30 days before the end date" is read as any time from 30 days before the end date up to and including the end date, not only on the 30th day. "Today" is the current UTC date.
-15. **Renewal model.** A renewal keeps the same policy and reference and adds the next one-year term, starting on the previous end date. The term history is kept, so a renewed-but-not-yet-started term can be refunded separately from the current one.
-16. **Renewal premium and payment.** The renew request supplies the new term's premium. For an auto-renewing policy it must also supply the payment method, and a payment for the full premium is taken. For a policy that doesn't auto renew, no payment is created; paying for that term is assumed to happen outside this API.
-17. **A policy can only be renewed once per term.** Renewing again before the new term starts returns `409`. It can be renewed again in the next term's window.
-18. **Cancellation date.** The consumer supplies the date cover ends. It can't be in the past (no backdating), and can't be after the policy end date. Cancelling on the end date is allowed but refunds nothing.
-19. **Cooling-off period.** The first 14 days of a term, including its start date (start date + 0 to + 13 days). It applies to every term, including renewals.
-20. **Pro rata refund.** `amount paid × (end date − cancellation date) ÷ (end date − start date)`, in days, so the cancellation date counts as unused. Rounded to 2 decimal places with midpoint rounding away from zero. Leap-year terms are 366 days.
-21. **Refunds per term.** Each term that has a payment is refunded on its own, to that payment's method ("the same method as the original payment"). A renewed term with no payment (no auto renew) is not refunded, because nothing was collected. Zero-value refunds are not recorded.
-22. **Cancelled policies.** These can't be cancelled again or renewed (`409`).
-23. **Recording claims.** Claims handling is out of scope, so the API only records *that* a policy has a claim: no claim details are stored, and it can't be undone. A further claim changes nothing. A claim can't be recorded on a cancelled policy (`409`).
-24. **No refund with claims.** "No refund if there are claims" applies to the whole policy: every term, including a renewed term that hasn't started, gets no refund. The policy is still cancelled.
-25. **Cheque and auto renew.** Cheques can't be collected automatically, so `paymentType: Cheque` is rejected (`400` on `PaymentType`) when selling an auto-renewing policy and when renewing one. A policy that doesn't auto renew can still be paid by cheque, and its renewal takes no payment, so the payment type is ignored.
-26. **Cancellation quote.** The quote follows the same date rules as cancellation, and the date defaults to today. It isn't stored or reserved: the refund depends on the date the policy is actually cancelled, and on any claim recorded in between. It's a `GET` because it changes nothing.
+1. **References.** The consumer supplies the policy reference (max 20 characters). It is case-insensitive and stored in upper case, so `pol-1` and `POL-1` are the same policy. Payment references are generated by the server.
+2. **Amount.** The amount is the annual premium, supplied by the consumer. It must be greater than 0 with at most 2 decimal places. Pricing is out of scope.
+3. **Auth.** Endpoints use `AuthorizationLevel.Anonymous` so reviewers can call them easily. A real deployment would use function keys, Entra ID or APIM.
+4. **Renewal window.** "Can only be renewed 30 days before the end date" is read as any time from 30 days before the end date up to and including the end date, not only on the 30th day. "Today" is the current UTC date.
+5. **A policy can only be renewed once per term.** Renewing again before the new term starts returns `409`. It can be renewed again in the next term's window.
+6. **Cancelled policies.** These can't be cancelled again or renewed (`409`).
+7. **Recording claims.** Claims handling is out of scope, so the API only records *that* a policy has a claim: no claim details are stored, and it can't be undone. A further claim changes nothing. A claim can't be recorded on a cancelled policy (`409`).
+8. **No refund with claims.** "No refund if there are claims" applies to the whole policy: every term, including a renewed term that hasn't started, gets no refund. The policy is still cancelled.
 
-## Design notes
+## Design decisions and trade-offs
 
-- **Thin functions, one per file.** Each function (`Policies/SellPolicyFunction.cs`, `GetPolicyFunction.cs`, `CancelPolicyFunction.cs`, `RenewPolicyFunction.cs`, `GetCancellationQuoteFunction.cs`, `RecordClaimFunction.cs`) only parses HTTP and maps results to status codes, using shared helpers in `Http/HttpResults.cs`. All business logic lives in `Core`, which has no dependency on Azure Functions or EF Core. A test enforces the `{Name}Function` naming convention.
-- **Rules in the domain.** `Policy.Cancel`, `Policy.Renew` and `Policy.RecordClaim` enforce the state rules, and `RefundCalculator` is a pure function that is unit-tested rule by rule. `Policy.Cancel` issues exactly the refunds `Policy.QuoteCancellation` calculates, so a quote can't disagree with the real cancellation.
-- **Results, not exceptions.** `PolicyService` returns a `ServiceResult` (`Success`, `ValidationFailed`, `Conflict` or `NotFound`), and the domain returns a `DomainResult`, so expected outcomes are explicit and easy to test.
-- **Explicit missing fields.** Request value types are nullable. A missing `startDate` or `paymentType` gives a clear "required" error instead of silently becoming `0001-01-01` or the first enum value.
-- **Concurrency.** The policy reference is the primary key, so two concurrent sales of the same reference can't both succeed. Cancel and renew use optimistic concurrency: a `Version` column is checked on save. Two simultaneous cancellations can't both create refunds; the second gets `409` and can retry.
-- **Tests.** There are 255 tests:
-  - unit tests cover every rule boundary (day 60/61, 0/1/3/4 policyholders, the 16th birthday, leap days, postcode length, cooling-off day 13/14, renewal window day 30/31, pro rata rounding, cheque with and without auto renew);
-  - integration tests drive the real function methods against in-memory SQLite, with a fake clock for date rules;
-  - OpenAPI tests check that every function and status code is documented.
+- **Business rules in a framework-free domain.** `Policy.Cancel`, `Policy.Renew` and `Policy.RecordClaim` enforce the state rules, and `RefundCalculator` is a pure function tested rule by rule. `Core` has no dependency on Azure Functions or EF Core, so the rules can be tested in milliseconds and the hosting can change without touching them.
+- **Thin functions, one per file.** Each function only parses HTTP, calls the service and maps the result to a status code, using shared helpers in `Http/HttpResults.cs`.
+- **One refund calculation.** `Policy.Cancel` issues exactly the refunds `Policy.QuoteCancellation` calculates, so a quote can never disagree with the real cancellation.
+- **A policy is a series of one-year terms.** Rather than a single start and end date, each renewal adds a term with its own payment. This keeps the renewal history and lets a renewed-but-not-started term be refunded separately.
+- **Client-supplied reference as the primary key.** It matches the brief and makes selling safe to retry: a repeated request gets `409` instead of creating a duplicate policy. *Cost:* references could collide between consumers and may be guessable, which auth mitigates (see [What I'd do next](#what-id-do-next)).
+- **Optimistic concurrency.** Cancel, renew and claim check a `Version` column on save, so two simultaneous cancellations can't both create refunds; the second gets `409` and can retry. *Cost:* the caller has to handle a retry.
+- **Explicit missing fields.** Request value types are nullable, so a missing `startDate` or `paymentType` gives a clear "required" error instead of silently becoming `0001-01-01` or the first enum value.
+- **Injected clock.** All "today" logic goes through `TimeProvider`, so tests use a fake clock and the date rules are tested on exact boundaries.
+- **SQLite.** Zero setup for demo purposes. *Cost:* a single local file can't be shared by multiple instances, and there are no migrations.
 
-  Line coverage is about 88% for the Functions project and 98–99% for Core and Infrastructure.
+### Testing
+
+The tests are in three layers:
+
+- **Unit tests** cover every rule boundary: day 60/61, 0/1/3/4 policyholders, the 16th birthday, leap days, postcode length, cooling-off day 13/14, renewal window day 30/31, pro rata rounding, and cheque with and without auto renew.
+- **Integration tests** drive the real function methods against in-memory SQLite, with a fake clock for the date rules.
+- **OpenAPI tests** check that every function and status code is documented.
+
+Tests are named `GIVEN_..._WHEN_..._THEN_...` and split into Arrange / Act / Assert sections. The fakes are hand-written rather than generated by a mocking library. Line coverage is about 90% for the Functions project and 98–99% for Core and Infrastructure.
+
+## What I'd do next
+
+1. **Authentication and authorisation.** The endpoints are anonymous so reviewers can call them. First step: Entra ID (or APIM in front) with scopes per operation, so a consumer can only see and change its own policies.
+2. **A production database.** Move from SQLite to Azure SQL (EF Core makes this mostly a provider and connection-string change).
+3. **Observability.** Application Insights with structured logging, correlation IDs and alerts on error rates. Today there is only `ILogger` output.
+4. **Audit trail and claims.** Record who changed what and when, and turn the `HasClaims` flag into a proper claims model (or an integration with the claims system).
+
+Deliberately left out of scope: pricing, a list/search endpoint, editing policy details after sale, and a front end.

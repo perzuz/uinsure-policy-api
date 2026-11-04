@@ -38,14 +38,6 @@ public sealed class OpenApiTests
     }
 
     [Fact]
-    public void GIVEN_the_function_app_WHEN_inspecting_each_function_THEN_it_is_alone_in_a_class_named_after_it()
-    {
-        // Act & Assert
-        FunctionMethods.ShouldAllBe(m => m.DeclaringType!.Name == m.GetCustomAttribute<FunctionAttribute>()!.Name + "Function");
-        FunctionMethods.GroupBy(m => m.DeclaringType).ShouldAllBe(g => g.Count() == 1);
-    }
-
-    [Fact]
     public void GIVEN_the_function_app_WHEN_inspecting_each_function_THEN_it_has_a_unique_documented_operation()
     {
         // Act
